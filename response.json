@@ -1,0 +1,706 @@
+[
+    {
+        "color": "green",
+        "energy_consume": 0.28,
+        "energy_cost": 0.006,
+        "sensor_data": {
+            "humidity": 57.0,
+            "temperature": 19.5
+        },
+        "timestamp": "2025-03-10 17:00:00",
+        "uuid": "efg567hij007"
+    },
+    {
+        "color": "yellow",
+        "energy_consume": 0.35,
+        "energy_cost": 0.008,
+        "sensor_data": {
+            "humidity": 58.0,
+            "temperature": 20.5
+        },
+        "timestamp": "2025-03-10 16:00:00",
+        "uuid": "stu901vwx005"
+    },
+    {
+        "color": "yellow",
+        "energy_consume": 0.35,
+        "energy_cost": 0.008,
+        "sensor_data": {
+            "humidity": 58.0,
+            "temperature": 21.3
+        },
+        "timestamp": "2025-03-10 16:00:00",
+        "uuid": "stu901vwx005"
+    },
+    {
+        "color": "yellow",
+        "energy_consume": 0.35,
+        "energy_cost": 0.008,
+        "sensor_data": {
+            "humidity": 59.0,
+            "temperature": 20.5
+        },
+        "timestamp": "2025-03-10 16:00:00",
+        "uuid": "stu901vwx005"
+    },
+    {
+        "color": "yellow",
+        "energy_consume": 0.35,
+        "energy_cost": 0.008,
+        "sensor_data": {
+            "humidity": 59.0,
+            "temperature": 21.3
+        },
+        "timestamp": "2025-03-10 16:00:00",
+        "uuid": "stu901vwx005"
+    },
+    {
+        "color": "yellow",
+        "energy_consume": 0.35,
+        "energy_cost": 0.008,
+        "sensor_data": {
+            "humidity": 58.0,
+            "temperature": 20.5
+        },
+        "timestamp": "2025-03-10 16:00:00",
+        "uuid": "klm890nop008"
+    },
+    {
+        "color": "yellow",
+        "energy_consume": 0.35,
+        "energy_cost": 0.008,
+        "sensor_data": {
+            "humidity": 58.0,
+            "temperature": 21.3
+        },
+        "timestamp": "2025-03-10 16:00:00",
+        "uuid": "klm890nop008"
+    },
+    {
+        "color": "yellow",
+        "energy_consume": 0.35,
+        "energy_cost": 0.008,
+        "sensor_data": {
+            "humidity": 59.0,
+            "temperature": 20.5
+        },
+        "timestamp": "2025-03-10 16:00:00",
+        "uuid": "klm890nop008"
+    },
+    {
+        "color": "yellow",
+        "energy_consume": 0.35,
+        "energy_cost": 0.008,
+        "sensor_data": {
+            "humidity": 59.0,
+            "temperature": 21.3
+        },
+        "timestamp": "2025-03-10 16:00:00",
+        "uuid": "klm890nop008"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "jkl345mno003"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "yza234bcd006"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 50.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 52.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 23.5
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 24.0
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "red",
+        "energy_consume": 0.4,
+        "energy_cost": 0.009,
+        "sensor_data": {
+            "humidity": 51.0,
+            "temperature": 23.8
+        },
+        "timestamp": "2025-03-10 15:30:00",
+        "uuid": "wxy456zab010"
+    },
+    {
+        "color": "green",
+        "energy_consume": 0.25,
+        "energy_cost": 0.006,
+        "sensor_data": {
+            "humidity": 55.0,
+            "temperature": 19.8
+        },
+        "timestamp": "2025-03-10 15:00:00",
+        "uuid": "def789ghi002"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "abc123xyz001"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "mno678pqr004"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 60.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 65.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 22.1
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 21.0
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    },
+    {
+        "color": "blue",
+        "energy_consume": 0.3,
+        "energy_cost": 0.007,
+        "sensor_data": {
+            "humidity": 64.0,
+            "temperature": 20.9
+        },
+        "timestamp": "2025-03-10 14:30:00",
+        "uuid": "qrs123tuv009"
+    }
+]
