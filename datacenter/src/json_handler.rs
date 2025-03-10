@@ -3,19 +3,18 @@ use serde_json::Value;
 
 use crate::query::create_new_relation;
 use crate::db::{get_read_db, get_db};
+use crate::command_handler::router;
 
 pub async fn process_json(json: &Value) {
-    // For now, just print the received JSON
     info!("Processing JSON: {}", json);
     
-    // Here you can add more logic to handle different types of JSON messages
-    // based on their structure or content
+ 
     if let Some(message_type) = json.get("type") {
         match message_type.as_str() {
             Some("message") => handle_message(json),
-            Some("command") => handle_command(json),
+            Some("command") => handle_command(json).await,
             Some("data") => {
-                // Await the async function directly
+                
                 handle_data(json).await;
             },
             _ => info!("Unknown message type: {:?}", message_type),
@@ -31,11 +30,25 @@ fn handle_message(json: &Value) {
     }
 }
 
-fn handle_command(json: &Value) {
+async fn handle_command(json: &Value) {
     if let Some(command) = json.get("command") {
         info!("Received command: {:?}", command);
+        
+        
+        if let Some(cmd_str) = command.as_str() {
+            match router(cmd_str).await {
+                Ok(true) => info!("Command '{}' executed successfully", cmd_str),
+                Ok(false) => error!("Command '{}' execution failed", cmd_str),
+                Err(e) => error!("Error processing command '{}': {}", cmd_str, e),
+            }
+        } else {
+            error!("Command is not a string: {:?}", command);
+        }
+    } else {
+        error!("No 'command' field found in JSON");
     }
 }
+
 
 async fn handle_data(json: &Value) {
     if let Some(data) = json.get("data") {
@@ -47,8 +60,7 @@ async fn handle_data(json: &Value) {
             },
         };
         info!("Received data: {:?}", data);
-        
-        // Properly await the async function and handle its result
+      
         match create_new_relation(json, &db).await {
             true => info!("Successfully created new relations in Neo4j"),
             false => error!("Failed to create new relations in Neo4j"),

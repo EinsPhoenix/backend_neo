@@ -119,16 +119,46 @@ pub async fn create_new_relation(data: &Value, graph: &Graph) -> bool {
 
 pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> {
     let query = query(r#"
-        MATCH (uuid:UUID {id: $uuid})
-        RETURN uuid
+        MATCH (uuidNode:UUID {id: $uuid})
+        OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
+        OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
+        WITH uuidNode, color, timestamp
+        ORDER BY timestamp.value DESC
+        LIMIT 1
+        OPTIONAL MATCH (timestamp)-[:SENSOR_DATA]->(temp:Temperature)
+        OPTIONAL MATCH (timestamp)-[:SENSOR_DATA]->(humidity:Humidity)
+        RETURN uuidNode.id AS uuid,
+               color.value AS color,
+               { temperature: temp.value, humidity: humidity.value } AS sensor_data,
+               timestamp.value AS timestamp,
+               uuidNode.energy_consume AS energy_consume,
+               uuidNode.energy_cost AS energy_cost
     "#)
     .param("uuid", uuid);
 
     match graph.execute(query).await {
         Ok(mut result) => {
             if let Ok(Some(row)) = result.next().await {
-                let node: Value = row.get("uuid").unwrap();
-                Some(node)
+                // Extract values from the query result
+                let uuid_val: String = row.get("uuid").unwrap_or_default();
+                let color_val: String = row.get("color").unwrap_or_default();
+                let sensor_data: Value = row.get("sensor_data").unwrap_or(json!({}));
+                let timestamp_val: String = row.get("timestamp").unwrap_or_default();
+                let energy_consume: f64 = row.get("energy_consume").unwrap_or(0.0);
+                let energy_cost: f64 = row.get("energy_cost").unwrap_or(0.0);
+
+                // Construct the final JSON object
+                Some(json!({
+                    "uuid": uuid_val,
+                    "color": color_val,
+                    "sensor_data": {
+                        "temperature": sensor_data["temperature"].as_f64().unwrap_or(0.0),
+                        "humidity": sensor_data["humidity"].as_f64().unwrap_or(0.0)
+                    },
+                    "timestamp": timestamp_val,
+                    "energy_consume": energy_consume,
+                    "energy_cost": energy_cost
+                }))
             } else {
                 None
             }
@@ -143,16 +173,44 @@ pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> 
 // Funktion, um alle UUID-Nodes zu bekommen und in JSON umzuwandeln
 pub async fn get_all_uuid_nodes(graph: &Graph) -> Option<Value> {
     let query = query(r#"
-        MATCH (uuid:UUID)
-        RETURN uuid
+        MATCH (uuidNode:UUID)
+        OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
+        OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
+        WITH uuidNode, color, timestamp
+        ORDER BY timestamp.value DESC
+        WITH uuidNode, color, COLLECT(timestamp)[0] AS latest_timestamp
+        OPTIONAL MATCH (latest_timestamp)-[:SENSOR_DATA]->(temp:Temperature)
+        OPTIONAL MATCH (latest_timestamp)-[:SENSOR_DATA]->(humidity:Humidity)
+        RETURN uuidNode.id AS uuid,
+               color.value AS color,
+               { temperature: temp.value, humidity: humidity.value } AS sensor_data,
+               latest_timestamp.value AS timestamp,
+               uuidNode.energy_consume AS energy_consume,
+               uuidNode.energy_cost AS energy_cost
     "#);
 
     match graph.execute(query).await {
         Ok(mut result) => {
             let mut uuids = Vec::new();
             while let Ok(Some(row)) = result.next().await {
-                let node: Value = row.get("uuid").unwrap();
-                uuids.push(node);
+                let uuid_val: String = row.get("uuid").unwrap_or_default();
+                let color_val: String = row.get("color").unwrap_or_default();
+                let sensor_data: Value = row.get("sensor_data").unwrap_or(json!({}));
+                let timestamp_val: String = row.get("timestamp").unwrap_or_default();
+                let energy_consume: f64 = row.get("energy_consume").unwrap_or(0.0);
+                let energy_cost: f64 = row.get("energy_cost").unwrap_or(0.0);
+
+                uuids.push(json!({
+                    "uuid": uuid_val,
+                    "color": color_val,
+                    "sensor_data": {
+                        "temperature": sensor_data["temperature"].as_f64().unwrap_or(0.0),
+                        "humidity": sensor_data["humidity"].as_f64().unwrap_or(0.0)
+                    },
+                    "timestamp": timestamp_val,
+                    "energy_consume": energy_consume,
+                    "energy_cost": energy_cost
+                }));
             }
             Some(json!(uuids))
         },
@@ -307,6 +365,44 @@ pub async fn get_nodes_with_color(color: &str, graph: &Graph) -> Option<Value> {
         Err(e) => {
             error!("Failed to execute Neo4j query: {}", e);
             None
+        }
+    }
+}
+
+
+
+pub async fn reset_database_and_set_topology(graph: &Graph) -> Result<bool, String> {
+    
+    let delete_query = query(r#"
+        MATCH (n)
+        DETACH DELETE n
+    "#);
+
+    match graph.execute(delete_query).await {
+        Ok(_) => {
+            log::info!("Alle Nodes und Relationen wurden erfolgreich gelöscht");
+        },
+        Err(e) => {
+            let error_msg = format!("Fehler beim Löschen der Nodes und Relationen: {}", e);
+            error!("{}", error_msg);
+            return Err(error_msg);
+        }
+    }
+
+    
+    let topology_query = query(r#"
+        ALTER DATABASE neo4j SET TOPOLOGY 1 PRIMARIES 2 SECONDARIES
+    "#);
+
+    match graph.execute(topology_query).await {
+        Ok(_) => {
+            log::info!("Topologie erfolgreich auf 1 PRIMARY und 2 SECONDARY gesetzt");
+            Ok(true)
+        },
+        Err(e) => {
+            let error_msg = format!("Fehler beim Setzen der Topologie: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
         }
     }
 }

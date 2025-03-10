@@ -1,4 +1,5 @@
 use log::{info, error};
+use neo4rs::{Graph, query};
 use dotenv::dotenv;
 use std::env;
 use tokio::net::{TcpListener, TcpStream};
@@ -11,6 +12,7 @@ mod auth;
 mod json_handler;
 mod query;
 mod mqtt_handler;
+mod command_handler;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -20,13 +22,13 @@ async fn main() -> io::Result<()> {
         eprintln!("Logger already initialized.");
     }
     info!("Starting the server...");
-    match db::get_db().await {
-        Ok(_) => info!("Database connection established."),
+    let db = match db::get_db().await {
+        Ok(db) => db,
         Err(e) => {
-            error!("Database connection failed: {:?}", e);
-            return Err(io::Error::new(io::ErrorKind::Other, "Failed to connect to the database"));
-        }
-    }
+            error!("Failed to get database connection: {}", e);
+            return Err(io::Error::new(io::ErrorKind::Other, format!("Database connection failed: {}", e)));
+        },
+    };
 
     // Start MQTT client
     tokio::spawn(async {

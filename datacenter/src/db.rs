@@ -101,6 +101,7 @@ pub async fn get_read_db(number:usize) -> Result<&'static Graph, DbError> {
     info!("get_read_db called");
     if let Some(cluster) = DB.get() {
         info!("get_read_db returning secondary node");
+
         return Ok(&cluster.secondary_nodes[0]);
     }
 

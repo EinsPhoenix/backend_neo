@@ -1,23 +1,57 @@
-1741616226: mosquitto version 2.0.15 starting
-1741616226: Config loaded from /mosquitto/config/mosquitto.conf.
-1741616226: Opening ipv4 listen socket on port 1883.
-1741616226: Opening websockets listen socket on port 9001.
-1741616226: mosquitto version 2.0.15 running
-1741617408: mosquitto version 2.0.15 terminating
-1741617477: mosquitto version 2.0.15 starting
-1741617477: Config loaded from /mosquitto/config/mosquitto.conf.
-1741617477: Opening ipv4 listen socket on port 1883.
-1741617477: Opening websockets listen socket on port 9001.
-1741617477: mosquitto version 2.0.15 running
-1741617607: mosquitto version 2.0.15 terminating
-1741617610: mosquitto version 2.0.15 starting
-1741617610: Config loaded from /mosquitto/config/mosquitto.conf.
-1741617610: Opening ipv4 listen socket on port 1883.
-1741617610: Opening websockets listen socket on port 9001.
-1741617610: mosquitto version 2.0.15 running
-1741617889: mosquitto version 2.0.15 terminating
-1741617919: mosquitto version 2.0.15 starting
-1741617919: Config loaded from /mosquitto/config/mosquitto.conf.
-1741617919: Opening ipv4 listen socket on port 1883.
-1741617919: Opening websockets listen socket on port 9001.
-1741617919: mosquitto version 2.0.15 running
+1741638153: mosquitto version 2.0.15 starting
+1741638153: Config loaded from /mosquitto/config/mosquitto.conf.
+1741638153: Opening ipv4 listen socket on port 1883.
+1741638153: Opening websockets listen socket on port 9001.
+1741638153: mosquitto version 2.0.15 running
+1741638185: New connection from 172.20.0.6:45540 on port 1883.
+1741638185: Client rust-mqtt-client disconnected, not authorised.
+1741638318: mosquitto version 2.0.15 terminating
+1741638335: mosquitto version 2.0.15 starting
+1741638335: Config loaded from /mosquitto/config/mosquitto.conf.
+1741638335: Opening ipv4 listen socket on port 1883.
+1741638335: Opening websockets listen socket on port 9001.
+1741638335: mosquitto version 2.0.15 running
+1741638343: New connection from 172.20.0.6:51964 on port 1883.
+1741638343: New client connected from 172.20.0.6:51964 as rust-mqtt-client (p2, c1, k60, u'admin').
+1741638409: New connection from 172.20.0.1:50280 on port 1883.
+1741638409: New client connected from 172.20.0.1:50280 as auto-D84F8566-EB5F-8941-1676-EB6F7306D739 (p2, c1, k60, u'admin').
+1741638420: Client auto-D84F8566-EB5F-8941-1676-EB6F7306D739 disconnected.
+1741638420: New connection from 172.20.0.1:53924 on port 1883.
+1741638420: New client connected from 172.20.0.1:53924 as auto-E8EDC3B6-4586-287A-FC6D-5F1B54F74468 (p2, c1, k60, u'admin').
+1741638431: Client auto-E8EDC3B6-4586-287A-FC6D-5F1B54F74468 disconnected.
+1741638686: Client rust-mqtt-client closed its connection.
+1741638718: mosquitto version 2.0.15 terminating
+1741638902: mosquitto version 2.0.15 starting
+1741638902: Config loaded from /mosquitto/config/mosquitto.conf.
+1741638902: Opening ipv4 listen socket on port 1883.
+1741638902: Opening websockets listen socket on port 9001.
+1741638902: mosquitto version 2.0.15 running
+1741638926: New connection from 172.20.0.6:53576 on port 1883.
+1741638926: New client connected from 172.20.0.6:53576 as rust-mqtt-client (p2, c1, k60, u'admin').
+1741638940: New connection from 172.20.0.1:39666 on port 1883.
+1741638940: New client connected from 172.20.0.1:39666 as auto-FB0B5226-4944-EB5B-4D58-7A27F278CC7F (p2, c1, k60, u'admin').
+1741638942: Client auto-FB0B5226-4944-EB5B-4D58-7A27F278CC7F disconnected.
+1741638942: New connection from 172.20.0.1:51206 on port 1883.
+1741638942: New client connected from 172.20.0.1:51206 as auto-35D3987E-2B93-3CAB-1E86-05BEAC1447E4 (p2, c1, k60, u'admin').
+1741638943: Client auto-35D3987E-2B93-3CAB-1E86-05BEAC1447E4 disconnected.
+1741639269: New connection from 172.20.0.1:55604 on port 1883.
+1741639269: New client connected from 172.20.0.1:55604 as auto-5E1DD655-1C58-1AF3-201B-246DFDFC40DF (p2, c1, k60, u'admin').
+1741639271: Client auto-5E1DD655-1C58-1AF3-201B-246DFDFC40DF disconnected.
+1741639271: New connection from 172.20.0.1:55616 on port 1883.
+1741639271: New client connected from 172.20.0.1:55616 as auto-AE0BBDDD-E04D-B25B-D34B-EEF6A204A4B7 (p2, c1, k60, u'admin').
+1741639272: Client auto-AE0BBDDD-E04D-B25B-D34B-EEF6A204A4B7 disconnected.
+1741639290: Client rust-mqtt-client closed its connection.
+1741639322: mosquitto version 2.0.15 terminating
+1741639444: mosquitto version 2.0.15 starting
+1741639444: Config loaded from /mosquitto/config/mosquitto.conf.
+1741639444: Opening ipv4 listen socket on port 1883.
+1741639444: Opening websockets listen socket on port 9001.
+1741639444: mosquitto version 2.0.15 running
+1741639468: New connection from 172.20.0.6:49818 on port 1883.
+1741639468: New client connected from 172.20.0.6:49818 as rust-mqtt-client (p2, c1, k60, u'admin').
+1741639526: New connection from 172.20.0.1:38420 on port 1883.
+1741639526: New client connected from 172.20.0.1:38420 as auto-20C855E0-A556-7F5E-53E4-03A6A5D8270F (p2, c1, k60, u'admin').
+1741639528: Client auto-20C855E0-A556-7F5E-53E4-03A6A5D8270F disconnected.
+1741639528: New connection from 172.20.0.1:38434 on port 1883.
+1741639528: New client connected from 172.20.0.1:38434 as auto-0D5918C7-F0BC-DC8E-6648-2AB639A6E0F0 (p2, c1, k60, u'admin').
+1741639529: Client auto-0D5918C7-F0BC-DC8E-6648-2AB639A6E0F0 disconnected.
