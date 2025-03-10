@@ -3,3 +3,21 @@
 1741616226: Opening ipv4 listen socket on port 1883.
 1741616226: Opening websockets listen socket on port 9001.
 1741616226: mosquitto version 2.0.15 running
+1741617408: mosquitto version 2.0.15 terminating
+1741617477: mosquitto version 2.0.15 starting
+1741617477: Config loaded from /mosquitto/config/mosquitto.conf.
+1741617477: Opening ipv4 listen socket on port 1883.
+1741617477: Opening websockets listen socket on port 9001.
+1741617477: mosquitto version 2.0.15 running
+1741617607: mosquitto version 2.0.15 terminating
+1741617610: mosquitto version 2.0.15 starting
+1741617610: Config loaded from /mosquitto/config/mosquitto.conf.
+1741617610: Opening ipv4 listen socket on port 1883.
+1741617610: Opening websockets listen socket on port 9001.
+1741617610: mosquitto version 2.0.15 running
+1741617889: mosquitto version 2.0.15 terminating
+1741617919: mosquitto version 2.0.15 starting
+1741617919: Config loaded from /mosquitto/config/mosquitto.conf.
+1741617919: Opening ipv4 listen socket on port 1883.
+1741617919: Opening websockets listen socket on port 9001.
+1741617919: mosquitto version 2.0.15 running
