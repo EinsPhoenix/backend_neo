@@ -1,21 +1,21 @@
 
 services:
-  rust-app:
-    image: rust:latest
-    container_name: rust-datacenter
-    working_dir: /usr/src/datacenter
-    ports:
-      - "12345:12345"
-    volumes:
-      - ./datacenter:/usr/src/datacenter
-    command: cargo run --release
-    networks:
-      - app-network
-    depends_on:
-      - server1
-      - server2
-      - server3
-      - mqtt-broker
+  # rust-app:
+  #   image: rust:latest
+  #   container_name: rust-datacenter
+  #   working_dir: /usr/src/datacenter
+  #   ports:
+  #     - "12345:12345"
+  #   volumes:
+  #     - ./datacenter:/usr/src/datacenter
+  #   command: cargo run --release
+  #   networks:
+  #     - app-network
+  #   depends_on:
+  #     - server1
+  #     - server2
+  #     - server3
+  #     - mqtt-broker
 
   mqtt-broker:
     image: eclipse-mosquitto:2.0.15

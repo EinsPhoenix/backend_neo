@@ -8,7 +8,7 @@
             "temperature": 19.5
         },
         "timestamp": "2025-03-10 17:00:00",
-        "uuid": "efg567hij007"
+        "uuid": "test-uuid-1"
     },
     {
         "color": "yellow",
@@ -19,7 +19,7 @@
             "temperature": 20.5
         },
         "timestamp": "2025-03-10 16:00:00",
-        "uuid": "stu901vwx005"
+        "uuid": "test-uuid-2"
     },
     {
         "color": "yellow",
@@ -30,7 +30,7 @@
             "temperature": 21.3
         },
         "timestamp": "2025-03-10 16:00:00",
-        "uuid": "stu901vwx005"
+        "uuid": "test-uuid-3"
     },
     {
         "color": "yellow",
@@ -41,7 +41,7 @@
             "temperature": 20.5
         },
         "timestamp": "2025-03-10 16:00:00",
-        "uuid": "stu901vwx005"
+        "uuid": "test-uuid-4"
     },
     {
         "color": "yellow",
@@ -52,7 +52,7 @@
             "temperature": 21.3
         },
         "timestamp": "2025-03-10 16:00:00",
-        "uuid": "stu901vwx005"
+        "uuid": "test-uuid-5"
     },
     {
         "color": "yellow",

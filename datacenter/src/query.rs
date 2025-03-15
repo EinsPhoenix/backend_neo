@@ -1,5 +1,5 @@
 use neo4rs::{Graph, query};
-use log::error;
+use log::{error,info};
 use serde_json::Value;
 use std::collections::HashMap;
 use serde_json::json;
@@ -174,19 +174,25 @@ pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> 
 pub async fn get_all_uuid_nodes(graph: &Graph) -> Option<Value> {
     let query = query(r#"
         MATCH (uuidNode:UUID)
-        OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
-        OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
-        WITH uuidNode, color, timestamp
-        ORDER BY timestamp.value DESC
-        WITH uuidNode, color, COLLECT(timestamp)[0] AS latest_timestamp
-        OPTIONAL MATCH (latest_timestamp)-[:SENSOR_DATA]->(temp:Temperature)
-        OPTIONAL MATCH (latest_timestamp)-[:SENSOR_DATA]->(humidity:Humidity)
-        RETURN uuidNode.id AS uuid,
-               color.value AS color,
-               { temperature: temp.value, humidity: humidity.value } AS sensor_data,
-               latest_timestamp.value AS timestamp,
-               uuidNode.energy_consume AS energy_consume,
-               uuidNode.energy_cost AS energy_cost
+OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
+OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
+WITH uuidNode, color, timestamp
+ORDER BY timestamp.value DESC
+WITH uuidNode, color, HEAD(COLLECT(timestamp)) AS latest_timestamp
+OPTIONAL MATCH (latest_timestamp)-[:SENSOR_DATA]->(temp:Temperature)
+OPTIONAL MATCH (latest_timestamp)-[:SENSOR_DATA]->(humidity:Humidity)
+WITH uuidNode, 
+     color, 
+     latest_timestamp, 
+     HEAD(COLLECT(temp)) AS temp, 
+     HEAD(COLLECT(humidity)) AS humidity
+RETURN uuidNode.id AS uuid,
+       color.value AS color,
+       { temperature: temp.value, humidity: humidity.value } AS sensor_data,
+       latest_timestamp.value AS timestamp,
+       uuidNode.energy_consume AS energy_consume,
+       uuidNode.energy_cost AS energy_cost
+
     "#);
 
     match graph.execute(query).await {
@@ -212,6 +218,10 @@ pub async fn get_all_uuid_nodes(graph: &Graph) -> Option<Value> {
                     "energy_cost": energy_cost
                 }));
             }
+
+            
+            info!("Returned nodes count: {}", uuids.len());
+
             Some(json!(uuids))
         },
         Err(e) => {

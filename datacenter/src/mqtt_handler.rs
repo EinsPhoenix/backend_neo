@@ -1,375 +1,534 @@
 use rumqttc::{MqttOptions, AsyncClient, Event, Incoming, QoS, Transport};
 use tokio::time::{Duration, Instant};
 use log::{info, error, warn};
-use serde_json::{Value, Result as JsonResult};
+use serde_json::{Value, Result as JsonResult, json};
 use std::env;
 use std::error::Error;
 use uuid::Uuid;
-use crate::query::get_specific_uuid_node;
+use crate::query::{get_specific_uuid_node,get_all_uuid_nodes,get_nodes_with_color,get_nodes_in_time_range,get_nodes_with_temperature_or_humidity,get_temperature_humidity_at_time,get_nodes_with_energy_cost,get_nodes_with_energy_consume};
 use crate::db::get_db;
 use neo4rs::Graph;
 
-pub async fn start_mqtt_client() -> Result<(), Box<dyn Error>> {
-    // Generate a unique client ID for this connection
-    let client_id = format!("rust-mqtt-client-{}", Uuid::new_v4());
+use tokio::time; 
+use chrono;
+
+use std::sync::Arc;
+
+// Broker can only 10200
+const MAX_MESSAGE_SIZE: usize = 5000;
+
+async fn publish_paginated_results(client: &AsyncClient, topic: &str, payload: &Value) -> Result<(), Box<dyn Error>> {
+    let payload_str = serde_json::to_string(payload)?;
+    let payload_size = payload_str.len();
     
-    let mut mqtt_options = MqttOptions::new(
-        &client_id,
-        "mosquitto-broker",
-        1883
-    );
     
-    mqtt_options.set_credentials(
-        env::var("MQTT_USER").unwrap_or_else(|_| "admin".into()),
-        env::var("MQTT_PASSWORD").unwrap_or_else(|_| "admin".into())
-    );
-    let (client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
+    if payload_size <= MAX_MESSAGE_SIZE {
+        info!("Publishing to {}: {} bytes", topic, payload_size);
+        client.publish(topic, QoS::AtLeastOnce, false, payload_str).await?;
+        return Ok(());
+    }
     
-    // Verbindungs-Timeout
-    let connect_timeout = Duration::from_secs(10);
-    let start_time = Instant::now();
-    let mut connected = false;
-    // Phase 1: Verbindungsherstellung 
-    while Instant::now().duration_since(start_time) < connect_timeout {
-        match eventloop.poll().await {
-            Ok(Event::Incoming(Incoming::ConnAck(ack))) => {
-                info!("✅ Broker-Verbindung hergestellt: {:?}, Client-ID: {}", ack, client_id);
-                connected = true;
-                break;
-            },
-            Ok(event) => warn!("Zwischenereignis: {:?}", event),
-            Err(e) => {
-                error!("❌ Verbindungsfehler: {}", e);
-                return Err(e.into());
-            }
+   
+    info!("Large message detected ({} bytes), using pagination", payload_size);
+
+    
+    // Request ID for processing
+    let request_id = Uuid::new_v4().to_string();
+    
+    
+    let array_payload = match payload {
+        Value::Array(items) => items.clone(),
+        _ => {
+           
+            vec![payload.clone()]
         }
-    }
-    if !connected {
-        error!("⌛ Timeout: Broker nicht erreichbar!");
-        return Err("Broker offline".into());
-    }
-    // Phase 2: Normalbetrieb
-    info!("🚀 Starte normalen Betrieb... Client-ID: {}", client_id);
+    };
     
-    // Publish our client ID to a central topic so other clients know we exist
-    let connection_message = serde_json::json!({
-        "type": "client_connect",
-        "client_id": client_id
+    let mut current_page = 1;
+    let mut current_chunk = Vec::new();
+    let mut current_size = 0;
+    
+    // Calculate size of Metadata
+    let metadata_template = json!({
+        "type": "paginated",
+        "request_id": request_id,
+        "page": 999,
+        "total_pages": 999,
+        "data": []
+    });
+    let metadata_overhead = serde_json::to_string(&metadata_template)?.len() - 2; 
+    let effective_max_size = MAX_MESSAGE_SIZE - metadata_overhead - 50; 
+    
+    // estemate of pages
+    let total_items = array_payload.len();
+    let estimated_total_pages = (payload_size / effective_max_size) + 1;
+    
+    let mut total_pages = 0;
+    
+    for item in array_payload {
+        let item_json = serde_json::to_string(&item)?;
+        let item_size = item_json.len();
+        
+       
+        if !current_chunk.is_empty() && current_size + item_size + 1 > effective_max_size {
+            
+            let page_payload = json!({
+                "type": "paginated",
+                "request_id": request_id,
+                "page": current_page,
+                "total_pages": estimated_total_pages, 
+                "data": current_chunk
+            });
+            
+            let page_topic = format!("{}/page/{}", topic, current_page);
+            let page_json = serde_json::to_string(&page_payload)?;
+            
+            info!("Publishing page {}/{} to {} ({} bytes)", 
+                  current_page, estimated_total_pages, page_topic, page_json.len());
+            client.publish(&page_topic, QoS::AtLeastOnce, false, page_json).await?;
+            
+           
+            current_page += 1;
+            total_pages = current_page;
+            current_chunk = Vec::new();
+            current_size = 0;
+        }
+        
+        
+        current_chunk.push(item);
+        current_size += item_size + 1; 
+    }
+    
+    // last page when not emty
+    if !current_chunk.is_empty() {
+        let page_payload = json!({
+            "type": "paginated",
+            "request_id": request_id,
+            "page": current_page,
+            "total_pages": current_page, 
+            "data": current_chunk
+        });
+        
+        let page_topic = format!("{}/page/{}", topic, current_page);
+        let page_json = serde_json::to_string(&page_payload)?;
+        
+        info!("Publishing final page {}/{} to {} ({} bytes)", 
+              current_page, current_page, page_topic, page_json.len());
+        client.publish(&page_topic, QoS::AtLeastOnce, false, page_json).await?;
+        
+        total_pages = current_page;
+    }
+    
+    // Publish Summary
+    let summary_payload = json!({
+        "type": "summary",
+        "request_id": request_id,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "original_size": payload_size,
+        "topic_base": topic
     });
     
-    client.publish(
-        "rust/clients", 
-        QoS::AtLeastOnce, 
-        false, 
-        serde_json::to_vec(&connection_message)?
-    ).await?;
+    let summary_topic = format!("{}/summary", topic);
+    client.publish(&summary_topic, QoS::AtLeastOnce, false, serde_json::to_string(&summary_payload)?).await?;
+    info!("Published summary for request {}: {} total items across {} pages", 
+          request_id, total_items, total_pages);
     
-    // Subscribe to the general topic
-    client.subscribe("rust/topic", QoS::AtMostOnce).await?;
+    Ok(())
+}
+
+async fn publish_result(client: &AsyncClient, topic: &str, payload: &Value) -> Result<(), Box<dyn Error>> {
+    let payload_str = serde_json::to_string(payload)?;
+    let payload_size = payload_str.len();
     
-    // Also subscribe to our client-specific topic
-    let client_topic = format!("rust/topic/{}", client_id);
-    client.subscribe(&client_topic, QoS::AtMostOnce).await?;
-    
-    loop {
-        match eventloop.poll().await {
-            Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                let db = match get_db().await {
-                    Ok(db) => db,
-                    Err(e) => {
-                        error!("Database connection failed: {}", e);
-                        continue;
-                    },
-                };
-                handle_message(&publish, &client, &db, &client_id).await?;
-            },
-            Ok(Event::Incoming(Incoming::Disconnect)) => {
-                info!("🔌 Verbindung getrennt für Client-ID: {}", client_id);
-                break;
-            },
-            Err(e) => {
-                error!("⚠️ Fehler im Eventloop: {}, Client-ID: {}", e, client_id);
-                break;
-            }
-            _ => {}
-        }
+    // info!("Publishing to {}: {} bytes, the response was: {}", topic, payload_size, payload_str);
+    if payload_size <= MAX_MESSAGE_SIZE {
+       
+        info!("Publishing to {}: {} bytes", topic, payload_size);
+        client.publish(topic, QoS::AtLeastOnce, false, payload_str).await?;
+    } else {
+       
+        info!("Message too large for direct publish ({} bytes), using pagination", payload_size);
+        publish_paginated_results(client, topic, payload).await?;
     }
-    Ok(())
-}
-
-async fn handle_message(
-    publish: &rumqttc::Publish,
-    client: &AsyncClient,
-    db: &Graph,
-    client_id: &str
-) -> Result<(), Box<dyn Error>> {
-    info!("📨 Nachricht empfangen: {:?} für Client-ID: {}", publish.payload, client_id);
-    let payload_str = std::str::from_utf8(&publish.payload)?;
-    
-    // Check if this message is for us specifically
-    let is_client_specific = publish.topic.contains(client_id);
-    
-    // Parse the message
-    parse_and_process_json(payload_str, &db, client, client_id, is_client_specific).await?;
     
     Ok(())
 }
 
-async fn parse_and_process_json(
-    json_str: &str, 
-    db: &Graph,
-    client: &AsyncClient,
-    client_id: &str,
-    is_client_specific: bool
-) -> Result<(), Box<dyn std::error::Error>> {
-    let parsed: serde_json::Result<Value> = serde_json::from_str(json_str);
+
+async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Result<(), Box<dyn Error>> {
+    let payload_str = String::from_utf8_lossy(payload);
+    info!("Received request: {}", payload_str);
     
-    match parsed {
-        Ok(json_value) => {
-            // Check if the message has a target client_id
-            let target_client_id = json_value.get("client_id").and_then(Value::as_str);
+    
+    let json_value: Value = match serde_json::from_str(&payload_str) {
+        Ok(value) => value,
+        Err(e) => {
+            error!("Failed to parse JSON: {}", e);
+            return Err(Box::new(e));
+        }
+    };
+    
+    // extract Clientid
+    let requesting_client_id = match json_value.get("client_id").and_then(Value::as_str) {
+        Some(id) => id,
+        None => {
+            error!("Missing client_id in request");
+            return Err("Missing client_id".into());
+        }
+    };
+    
+    // Request-Typ 
+    match json_value.get("request").and_then(Value::as_str) {
+        Some("uuid") => {
+            info!("Processing UUID request for client: {}", requesting_client_id);
             
-            // Only process if:
-            // 1. No specific target is specified, OR
-            // 2. We are the specific target, OR
-            // 3. Message came in on our specific topic (is_client_specific)
-            if target_client_id.is_none() || target_client_id == Some(client_id) || is_client_specific {
-                match json_value.get("type").and_then(Value::as_str) {
-                    Some("uuid") => {
-                        // Process UUID type
-                        if let Some(data) = json_value.get("data").and_then(Value::as_str) {
-                            info!("Processing UUID: {} for Client-ID: {}", data, client_id);
-                            match get_specific_uuid_node(data, &db).await {
+           // Process the request
+            if let Some(payload) = json_value.get("payload") {
+                if let Some(uuid_array) = payload.as_array() {
+                    for uuid_obj in uuid_array {
+                        if let Some(uuid) = uuid_obj.get("uuid").and_then(Value::as_str) {
+                            info!("Processing UUID: {} for Client-ID: {}", uuid, requesting_client_id);
+                            
+                         
+                            let response_topic = format!("rust/uuid/{}", requesting_client_id);
+                            
+                            
+                            match get_specific_uuid_node(uuid, db).await {
                                 Some(node) => {
-                                    info!("Found node for UUID {}: {:?}", data, node);
-                                    // Use client-specific response topic
-                                    let response_topic = format!("rust/response/{}/{}", client_id, data);
+                                    info!("Found node for UUID {}: {:?}", uuid, node);
                                     publish_result(client, &response_topic, &node).await?;
                                 },
                                 None => {
-                                    info!("No node found for UUID: {}", data);
-                                    let response_topic = format!("rust/response/{}/{}", client_id, data);
-                                    let empty_response = serde_json::json!({
-                                        "uuid": data,
+                                    info!("No node found for UUID: {}", uuid);
+                                    let empty_response = json!({
+                                        "uuid": uuid,
                                         "found": false,
                                         "message": "No data found for this UUID"
                                     });
                                     publish_result(client, &response_topic, &empty_response).await?;
                                 }
                             }
-                        } else {
-                            error!("Missing or invalid 'data' field for type 'uuid'. Input: {}", json_str);
                         }
-                    },
-                    Some("all") => {
-                        info!("Processing 'all' request for Client-ID: {}", client_id);
-                        match crate::query::get_all_uuid_nodes(&db).await {
-                            Some(all_nodes) => {
-                                let response_topic = format!("rust/response/{}/all", client_id);
-                                publish_result(client, &response_topic, &all_nodes).await?;
-                            },
-                            None => {
-                                error!("Failed to get all UUID nodes for Client-ID: {}", client_id);
-                            }
-                        }
-                    },
-                    Some("color") => {
-                        info!("Processing 'color' data for Client-ID: {}", client_id);
-                        if let Some(color_data) = json_value.get("data").and_then(Value::as_str) {
-                            match crate::query::get_nodes_with_color(color_data, &db).await {
-                                Some(processed) => {
-                                    let response_topic = format!("rust/response/{}/color", client_id);
-                                    publish_result(client, &response_topic, &processed).await?;
-                                },
-                                None => {
-                                    error!("Failed to get nodes with color: {} for Client-ID: {}", color_data, client_id);
-                                }
-                            }
-                        } else {
-                            error!("Missing or invalid 'data' field for type 'color'. Input: {}", json_str);
-                        }
-                    },
-                    Some("time_range") => {
-                        info!("Processing 'time_range' data for Client-ID: {}", client_id);
-                        let start = json_value.get("start").and_then(Value::as_str);
-                        let end = json_value.get("end").and_then(Value::as_str);
-                        
-                        if let (Some(start_time), Some(end_time)) = (start, end) {
-                            match crate::query::get_nodes_in_time_range(start_time, end_time, &db).await {
-                                Some(nodes) => {
-                                    let response_topic = format!("rust/response/{}/time_range", client_id);
-                                    publish_result(client, &response_topic, &nodes).await?;
-                                },
-                                None => {
-                                    error!("Failed to get nodes in time range from {} to {} for Client-ID: {}", 
-                                           start_time, end_time, client_id);
-                                }
-                            }
-                        } else {
-                            error!("Missing or invalid 'start' or 'end' fields for type 'time_range'. Input: {}", json_str);
-                        }
-                    },
-                    Some("temperature_humidity") => {
-                        info!("Processing 'temperature_humidity' data for Client-ID: {}", client_id);
-                        let temp = json_value.get("temperature").and_then(Value::as_f64);
-                        let humidity = json_value.get("humidity").and_then(Value::as_f64);
-                        
-                        if let (Some(temp_val), Some(humidity_val)) = (temp, humidity) {
-                            match crate::query::get_nodes_with_temperature_or_humidity(temp_val, humidity_val, &db).await {
-                                Some(nodes) => {
-                                    let response_topic = format!("rust/response/{}/temperature_humidity", client_id);
-                                    publish_result(client, &response_topic, &nodes).await?;
-                                },
-                                None => {
-                                    error!("Failed to get nodes with temperature {} and humidity {} for Client-ID: {}", 
-                                           temp_val, humidity_val, client_id);
-                                }
-                            }
-                        } else {
-                            error!("Missing or invalid 'temperature' or 'humidity' fields for type 'temperature_humidity'. Input: {}", json_str);
-                        }
-                    },
-                    Some("timestamp") => {
-                        info!("Processing 'timestamp' data for Client-ID: {}", client_id);
-                        if let Some(timestamp) = json_value.get("data").and_then(Value::as_str) {
-                            match crate::query::get_temperature_humidity_at_time(&db, timestamp).await {
-                                Some((temp, humidity)) => {
-                                    let response = serde_json::json!({
-                                        "timestamp": timestamp,
-                                        "temperature": temp,
-                                        "humidity": humidity
-                                    });
-                                    let response_topic = format!("rust/response/{}/timestamp", client_id);
-                                    publish_result(client, &response_topic, &response).await?;
-                                },
-                                None => {
-                                    error!("Failed to get temperature and humidity at timestamp: {} for Client-ID: {}", 
-                                           timestamp, client_id);
-                                }
-                            }
-                        } else {
-                            error!("Missing or invalid 'data' field for type 'timestamp'. Input: {}", json_str);
-                        }
-                    },
-                    Some("energy_cost") => {
-                        info!("Processing 'energy_cost' data for Client-ID: {}", client_id);
-                        if let Some(cost) = json_value.get("data").and_then(Value::as_f64) {
-                            match crate::query::get_nodes_with_energy_cost(cost, &db).await {
-                                Some(nodes) => {
-                                    let response_topic = format!("rust/response/{}/energy_cost", client_id);
-                                    publish_result(client, &response_topic, &nodes).await?;
-                                },
-                                None => {
-                                    error!("Failed to get nodes with energy cost: {} for Client-ID: {}", cost, client_id);
-                                }
-                            }
-                        } else {
-                            error!("Missing or invalid 'data' field for type 'energy_cost'. Input: {}", json_str);
-                        }
-                    },
-                    Some("energy_consume") => {
-                        info!("Processing 'energy_consume' data for Client-ID: {}", client_id);
-                        if let Some(consume) = json_value.get("data").and_then(Value::as_f64) {
-                            match crate::query::get_nodes_with_energy_consume(consume, &db).await {
-                                Some(nodes) => {
-                                    let response_topic = format!("rust/response/{}/energy_consume", client_id);
-                                    publish_result(client, &response_topic, &nodes).await?;
-                                },
-                                None => {
-                                    error!("Failed to get nodes with energy consumption: {} for Client-ID: {}", consume, client_id);
-                                }
-                            }
-                        } else {
-                            error!("Missing or invalid 'data' field for type 'energy_consume'. Input: {}", json_str);
-                        }
-                    },
-                    Some(other) => {
-                        error!("Unknown type '{}' in JSON for Client-ID: {}. Full input: {}", other, client_id, json_str);
+                    }
+                } else {
+                    error!("Invalid payload format, expected array");
+                    return Err("Invalid payload format".into());
+                }
+            } else {
+           
+                warn!("No payload provided for UUID request");
+            }
+        },
+        Some("all") => {
+            info!("Processing 'all' request for Client-ID: {}", requesting_client_id);
+            match get_all_uuid_nodes(db).await {
+                Some(all_nodes) => {
+                    let response_topic = format!("rust/response/{}/all", requesting_client_id);
+                    publish_result(client, &response_topic, &all_nodes).await?;
+                },
+                None => {
+                    error!("Failed to get all UUID nodes for Client-ID: {}", requesting_client_id);
+                    let response_topic = format!("rust/response/{}/all", requesting_client_id);
+                            let response = json!({
+                                      "status": "error",
+                                      "message": format!("Failed to get all UUID nodes")
+                                  });
+                            publish_result(client, &response_topic, &response).await?;
+                }
+            }
+        },
+        Some("color") => {
+            info!("Processing 'color' data for Client-ID: {}", requesting_client_id);
+            if let Some(color_data) = json_value.get("data").and_then(Value::as_str) {
+                match get_nodes_with_color(color_data, db).await {
+                    Some(processed) => {
+                        let response_topic = format!("rust/response/{}/color", requesting_client_id);
+                        publish_result(client, &response_topic, &processed).await?;
                     },
                     None => {
-                        error!("Missing 'type' field in JSON for Client-ID: {}: {}", client_id, json_str);
+                        error!("Failed to get nodes with color: {} for Client-ID: {}", color_data, requesting_client_id);
+                        let response_topic = format!("rust/response/{}/color", requesting_client_id);
+                            let response = json!({
+                                      "status": "error",
+                                      "message": format!("Failed to get nodes with color")
+                                  });
+                            publish_result(client, &response_topic, &response).await?;
                     }
                 }
             } else {
-                // Message is for another client, we ignore it
-                info!("Skipping message intended for another client: {}", target_client_id.unwrap_or("unknown"));
+                error!("Missing or invalid 'data' field for type 'color'. Input: {}", payload_str);
             }
         },
-        Err(e) => {
-            error!("Failed to parse JSON for Client-ID: {}: {}", client_id, e);
+        Some("time_range") => {
+            info!("Processing 'time_range' data for Client-ID: {}", requesting_client_id);
+            let start = json_value.get("start").and_then(Value::as_str);
+            let end = json_value.get("end").and_then(Value::as_str);
+            
+            if let (Some(start_time), Some(end_time)) = (start, end) {
+                match get_nodes_in_time_range(start_time, end_time, db).await {
+                    Some(nodes) => {
+                        let response_topic = format!("rust/response/{}/time_range", requesting_client_id);
+                        publish_result(client, &response_topic, &nodes).await?;
+                    },
+                    None => {
+                        error!("Failed to get nodes in time range from {} to {} for Client-ID: {}", 
+                               start_time, end_time, requesting_client_id);
+                            let response_topic = format!("rust/response/{}/time_range", requesting_client_id);
+                            let response = json!({
+                                      "status": "error",
+                                      "message": format!("Failed to get nodes in time range")
+                                  });
+                            publish_result(client, &response_topic, &response).await?;
+                    }
+                }
+            } else {
+                error!("Missing or invalid 'start' or 'end' fields for type 'time_range'. Input: {}", payload_str);
+            }
+        },
+        Some("temperature_humidity") => {
+            info!("Processing 'temperature_humidity' data for Client-ID: {}", requesting_client_id);
+            let temp = json_value.get("temperature").and_then(Value::as_f64);
+            let humidity = json_value.get("humidity").and_then(Value::as_f64);
+            
+            if let (Some(temp_val), Some(humidity_val)) = (temp, humidity) {
+                match get_nodes_with_temperature_or_humidity(temp_val, humidity_val, db).await {
+                    Some(nodes) => {
+                        let response_topic = format!("rust/response/{}/temperature_humidity", requesting_client_id);
+                        publish_result(client, &response_topic, &nodes).await?;
+                    },
+                    None => {
+                        error!("Failed to get nodes with temperature {} and humidity {} for Client-ID: {}", 
+                               temp_val, humidity_val, requesting_client_id);
+                            let response_topic = format!("rust/response/{}/temperature_humidity", requesting_client_id);
+                            let response = json!({
+                                      "status": "error",
+                                      "message": format!("Failed to get nodes with temperature and humidity")
+                                  });
+                            publish_result(client, &response_topic, &response).await?;
+                    }
+                }
+            } else {
+                error!("Missing or invalid 'temperature' or 'humidity' fields for type 'temperature_humidity'. Input: {}", payload_str);
+            }
+        },
+        Some("timestamp") => {
+            info!("Processing 'timestamp' data for Client-ID: {}", requesting_client_id);
+            if let Some(timestamp) = json_value.get("data").and_then(Value::as_str) {
+                match get_temperature_humidity_at_time(db, timestamp).await {
+                    Some((temp, humidity)) => {
+                        let response = json!({
+                            "timestamp": timestamp,
+                            "temperature": temp,
+                            "humidity": humidity
+                        });
+                        let response_topic = format!("rust/response/{}/timestamp", requesting_client_id);
+                        publish_result(client, &response_topic, &response).await?;
+                    },
+                    None => {
+                        error!("Failed to get temperature and humidity at timestamp: {} for Client-ID: {}", 
+                               timestamp, requesting_client_id);
+                            let response_topic = format!("rust/response/{}/timestamp", requesting_client_id);
+                            let response = json!({
+                                   "status": "error",
+                                   "message": format!("Failed to get temperature and humidity at timestamp")
+                               });
+                            publish_result(client, &response_topic, &response).await?;
+                    }
+                }
+            } else {
+                error!("Missing or invalid 'data' field for type 'timestamp'. Input: {}", payload_str);
+            }
+        },
+        Some("energy_cost") => {
+            info!("Processing 'energy_cost' data for Client-ID: {}", requesting_client_id);
+            if let Some(cost) = json_value.get("data").and_then(Value::as_f64) {
+                match get_nodes_with_energy_cost(cost, db).await {
+                    Some(nodes) => {
+                        let response_topic = format!("rust/response/{}/energy_cost", requesting_client_id);
+                        publish_result(client, &response_topic, &nodes).await?;
+                    },
+                    None => {
+                        error!("Failed to get nodes with energy cost: {} for Client-ID: {}", cost, requesting_client_id);
+                        let response_topic = format!("rust/response/{}/energy_cost", requesting_client_id);
+                        let response = json!({
+                            "status": "error",
+                            "message": format!("Failed to get nodes with energy cost")
+                        });
+                        publish_result(client, &response_topic, &response).await?;
+                    }
+                }
+            } else {
+                error!("Missing or invalid 'data' field for type 'energy_cost'. Input: {}", payload_str);
+            }
+        },
+        Some("energy_consume") => {
+            info!("Processing 'energy_consume' data for Client-ID: {}", requesting_client_id);
+            if let Some(consume) = json_value.get("data").and_then(Value::as_f64) {
+                match get_nodes_with_energy_consume(consume, db).await {
+                    Some(nodes) => {
+                        let response_topic = format!("rust/response/{}/energy_consume", requesting_client_id);
+                        publish_result(client, &response_topic, &nodes).await?;
+                    },
+                    None => {
+                        error!("Failed to get nodes with energy consumption: {} for Client-ID: {}", consume, requesting_client_id);
+
+                        let response_topic = format!("rust/response/{}/energy_consume", requesting_client_id);
+                        let response = json!({
+                            "status": "error",
+                            "message": format!("Failed to get nodes with energy consumption")
+                        });
+                        publish_result(client, &response_topic, &response).await?;
+                    }
+                }
+            } else {
+                error!("Missing or invalid 'data' field for type 'energy_consume'. Input: {}", payload_str);
+            }
+        },
+        Some("topic") => {
+            
+            info!("Topic request not implemented yet");
+            let response_topic = format!("rust/topic/{}", requesting_client_id);
+            let response = json!({
+                "status": "not_implemented",
+                "message": "Topic request handling not implemented yet"
+            });
+            publish_result(client, &response_topic, &response).await?;
+        },
+        Some(other) => {
+            
+            warn!("Unknown request type: {}", other);
+            let response_topic = format!("rust/response/{}", requesting_client_id);
+            let response = json!({
+                "status": "error",
+                "message": format!("Unknown request type: {}", other)
+            });
+            publish_result(client, &response_topic, &response).await?;
+        },
+        None => {
+            error!("Missing request type");
+            return Err("Missing request type".into());
         }
     }
+    
     Ok(())
 }
 
-async fn publish_result(client: &AsyncClient, topic: &str, data: &Value) -> Result<(), Box<dyn std::error::Error>> {
-    const MAX_PACKET_SIZE: usize = 5000; // Safe limit below broker's 10240 bytes
+pub async fn start_mqtt_client() -> Result<(), Box<dyn Error>> {
+  
+    let client_id = format!("rust-mqtt-server-{}", Uuid::new_v4());
     
-    let response_json = serde_json::to_vec(data)?;
     
-    if response_json.len() <= MAX_PACKET_SIZE {
-        // Normal publishing for messages within size limit
-        client.publish(topic, QoS::AtMostOnce, false, response_json).await?;
-        info!("Result published to topic: {}", topic);
-    } else {
-        // Split large messages into chunks
-        info!("Large message detected ({} bytes). Splitting into chunks...", response_json.len());
-        
-        // Convert the original Value to a mutable JSON object to add split information
-        let mut data_map = if let Value::Object(map) = data.clone() {
-            map
-        } else {
-            // If not an object, wrap it in one
-            let mut map = serde_json::Map::new();
-            map.insert("data".to_string(), data.clone());
-            map
-        };
-        
-        // Calculate number of chunks needed
-        let total_chunks = (response_json.len() + MAX_PACKET_SIZE - 1) / MAX_PACKET_SIZE;
-        let json_str = serde_json::to_string(data)?;
-        
-        // Split the JSON string into chunks
-        for chunk_index in 0..total_chunks {
-            let start = chunk_index * MAX_PACKET_SIZE;
-            let end = std::cmp::min(start + MAX_PACKET_SIZE, json_str.len());
-            let chunk = &json_str[start..end];
-            
-            // Create a new JSON object for each chunk
-            let mut chunk_data = serde_json::Map::new();
-            
-            // Add split metadata
-            chunk_data.insert("split_index".to_string(), Value::Number(serde_json::Number::from(chunk_index + 1)));
-            chunk_data.insert("total_splits".to_string(), Value::Number(serde_json::Number::from(total_chunks)));
-            chunk_data.insert("original_size".to_string(), Value::Number(serde_json::Number::from(json_str.len())));
-            
-            // Add the data chunk
-            chunk_data.insert("chunk".to_string(), Value::String(chunk.to_string()));
-            
-            // Convert to JSON and publish
-            let chunk_json = Value::Object(chunk_data);
-            let chunk_bytes = serde_json::to_vec(&chunk_json)?;
-            
-            // Construct split-specific topic
-            let split_topic = format!("{}/split/{}/{}", topic, chunk_index + 1, total_chunks);
-            
-            client.publish(&split_topic, QoS::AtLeastOnce, false, chunk_bytes).await?;
-            info!("Published chunk {}/{} to topic: {}", chunk_index + 1, total_chunks, split_topic);
+    // MQTT-Optionen 
+    let mut mqtt_options = MqttOptions::new(
+        &client_id,
+        env::var("MQTT_BROKER").unwrap_or_else(|_| "mosquitto-broker".into()),
+        env::var("MQTT_PORT").unwrap_or_else(|_| "1883".into()).parse::<u16>().unwrap_or(1883)
+    );
+    
+    mqtt_options.set_keep_alive(Duration::from_secs(30));
+    mqtt_options.set_credentials(
+        env::var("MQTT_USER").unwrap_or_else(|_| "admin".into()),
+        env::var("MQTT_PASSWORD").unwrap_or_else(|_| "admin".into())
+    );
+    
+   
+    let (client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
+    let client = Arc::new(client);
+    
+   
+    let connect_timeout = Duration::from_secs(10);
+    let start_time = Instant::now();
+    let mut connected = false;
+    
+    // Phase 1: Connection 
+    while Instant::now().duration_since(start_time) < connect_timeout {
+        match eventloop.poll().await {
+            Ok(Event::Incoming(Incoming::ConnAck(ack))) => {
+                info!("✅ Broker-Connection succesfull: {:?}, Client-ID: {}", ack, client_id);
+                connected = true;
+                break;
+            },
+            Ok(event) => warn!("Zwischenereignis: {:?}", event),
+            Err(e) => {
+                error!("❌ Connection Failed: {}", e);
+                return Err(e.into());
+            }
         }
-        
-        // Publish a summary message to the original topic
-        let mut summary = serde_json::Map::new();
-        summary.insert("message_split".to_string(), Value::Bool(true));
-        summary.insert("total_chunks".to_string(), Value::Number(serde_json::Number::from(total_chunks)));
-        summary.insert("original_size".to_string(), Value::Number(serde_json::Number::from(json_str.len())));
-        summary.insert("base_topic".to_string(), Value::String(topic.to_string()));
-        
-        let summary_json = Value::Object(summary);
-        let summary_bytes = serde_json::to_vec(&summary_json)?;
-        
-        client.publish(topic, QoS::AtLeastOnce, false, summary_bytes).await?;
-        info!("Published split summary to topic: {}", topic);
     }
     
-    Ok(())
+    if !connected {
+        error!("⌛ Timeout: Broker not reachable!");
+        return Err("Broker offline".into());
+    }
+    
+    // Phase 2: Normal Service
+    info!("🚀 Start normal service... Client-ID: {}", client_id);
+    
+
+    let subscribe_client = client.clone();
+    subscribe_client.subscribe("rust/request", QoS::AtLeastOnce).await?;
+    info!("🔔 Subbed to: rust/request");
+    
+    // Heartbeat-Timer
+    let heartbeat_client = client.clone();
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let status = json!({
+                "server_id": client_id,
+                "status": "running",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            });
+            
+            if let Err(e) = heartbeat_client.publish(
+                "rust/status", 
+                QoS::AtLeastOnce, 
+                false, 
+                serde_json::to_string(&status).unwrap()
+            ).await {
+                error!("❌ Failed to send Heartbeat: {}", e);
+            }
+        }
+    });
+    
+    // Event-Processing 
+    info!("👂 Waiting for request...");
+    loop {
+        match eventloop.poll().await {
+            Ok(Event::Incoming(Incoming::Publish(msg))) => {
+                if msg.topic == "rust/request" {
+                    let process_client = client.clone();
+                    let payload = msg.payload.to_vec();
+                   
+
+                    let db_ref = match get_db().await {
+                        Ok(db) => db,
+                        Err(e) => {
+                            error!("Database connection failed: {}", e);
+                            continue;
+                        },
+                    };
+                    
+                    // Processing it in a seperat Task 
+                    tokio::spawn(async move {
+                        if let Err(e) = process_request(&process_client, &payload, &db_ref).await {
+                            error!("❌ Failed to process request: {}", e);
+                        }
+                    });
+                }
+            },
+            Ok(Event::Incoming(Incoming::Disconnect)) => {
+                warn!("🔌 Connection to Broker broken, trying to connect...");
+               
+            },
+            Ok(_) => {}, 
+            Err(e) => {
+                error!("❌ Failed in the Event-Loop: {}", e);
+               
+                time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
 }

@@ -2,7 +2,7 @@
     "type": "data",
     "data": [
       {
-        "uuid": "abc123xyz001",
+        "uuid": "test-uuid-1",
         "color": "blue",
         "sensor_data": {
           "temperature": 22.1,
@@ -13,7 +13,7 @@
         "energy_cost": 0.007
       },
       {
-        "uuid": "def789ghi002",
+        "uuid": "test-uuid-2",
         "color": "green",
         "sensor_data": {
           "temperature": 19.8,
@@ -24,7 +24,7 @@
         "energy_cost": 0.006
       },
       {
-        "uuid": "jkl345mno003",
+        "uuid": "test-uuid-3",
         "color": "red",
         "sensor_data": {
           "temperature": 23.5,
