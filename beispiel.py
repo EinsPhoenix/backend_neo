@@ -54,7 +54,7 @@ class TcpClient:
         try:
             json_data = json.dumps(data)
             self.socket.sendall(json_data.encode("utf-8"))
-            print(f"Sent: {json_data}")
+            # print(f"Sent: {json_data}")
             return True
         except Exception as e:
             print(f"Error sending data: {e}")
@@ -69,7 +69,7 @@ class TcpClient:
             print("Connection closed.")
 
 
-def load_json_from_file(filename="test.json"):
+def load_json_from_file(filename="large_data.json"):
     """Load JSON data from a file in the same directory as the script."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(script_dir, filename)
@@ -81,7 +81,7 @@ def load_json_from_file(filename="test.json"):
     try:
         with open(file_path, "r", encoding="utf-8") as file:
             data = json.load(file)
-            print(f"Loaded JSON from '{filename}': {data}")
+            # print(f"Loaded JSON from '{filename}': {data}")
             return data
     except json.JSONDecodeError as e:
         print(f"ERROR: Invalid JSON in '{filename}': {e}")

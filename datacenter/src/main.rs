@@ -81,22 +81,39 @@ async fn handle_client(mut socket: TcpStream, correct_password: String) -> io::R
 }
 
 async fn receive_json(socket: &mut TcpStream) -> io::Result<Option<Value>> {
-    let mut buf = [0; 4096];
+  
+    let mut buf = vec![0; 11 * 1024 * 1024]; 
+    
+
     let n = socket.read(&mut buf).await?;
     
     if n == 0 {
-        return Ok(None); // Client disconnected
+        return Ok(None); 
     }
     
-    let data = String::from_utf8_lossy(&buf[..n]);
-    match serde_json::from_str::<Value>(&data) {
-        Ok(json) => {
-            info!("Received JSON: {}", json);
-            Ok(Some(json))
+ 
+    buf.truncate(n);
+    
+
+    match String::from_utf8(buf) {
+        Ok(data) => {
+            info!("Empfangene Datengröße: {} Bytes", data.len());
+          
+            match serde_json::from_str::<Value>(&data) {
+                Ok(json) => {
+                    info!("JSON erfolgreich geparst");
+                    Ok(Some(json))
+                },
+                Err(e) => {
+                    error!("Ungültiges JSON-Format: {:?}", e);
+                    socket.write_all(b"Fehler: Ungueltiges JSON-Format\n").await?;
+                    Err(io::Error::new(io::ErrorKind::InvalidData, e))
+                }
+            }
         },
         Err(e) => {
-            error!("Invalid JSON received: {:?}", e);
-            socket.write_all(b"Error: Invalid JSON format\n").await?;
+            error!("Ungültige UTF-8 Daten empfangen: {:?}", e);
+            socket.write_all(b"Fehler: Ungueltige UTF-8 Kodierung\n").await?;
             Err(io::Error::new(io::ErrorKind::InvalidData, e))
         }
     }
