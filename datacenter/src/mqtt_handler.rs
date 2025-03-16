@@ -5,7 +5,7 @@ use serde_json::{Value, Result as JsonResult, json};
 use std::env;
 use std::error::Error;
 use uuid::Uuid;
-use crate::query::{get_specific_uuid_node,get_all_uuid_nodes,get_nodes_with_color,get_nodes_in_time_range,get_nodes_with_temperature_or_humidity,get_temperature_humidity_at_time,get_nodes_with_energy_cost,get_nodes_with_energy_consume};
+use crate::query::{get_newest_uuid,get_specific_uuid_node,get_all_uuid_nodes,get_nodes_with_color,get_nodes_in_time_range,get_nodes_with_temperature_or_humidity,get_temperature_humidity_at_time,get_nodes_with_energy_cost,get_nodes_with_energy_consume};
 use crate::db::get_db;
 use neo4rs::Graph;
 
@@ -385,6 +385,27 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
                 error!("Missing or invalid 'data' field for type 'energy_consume'. Input: {}", payload_str);
             }
         },
+        Some("newest") => {
+            
+
+                match get_newest_uuid(db).await {
+                    Some(nodes) => {
+                        let response_topic = format!("rust/response/{}/newest", requesting_client_id);
+                        publish_result(client, &response_topic, &nodes).await?;
+                    },
+                    None => {
+                        error!("Failed to get newest nodes for Client-ID: {}", requesting_client_id);
+
+                        let response_topic = format!("rust/response/{}/newest", requesting_client_id);
+                        let response = json!({
+                            "status": "error",
+                            "message": format!("Failed to get nodes with energy consumption")
+                        });
+                        publish_result(client, &response_topic, &response).await?;
+                    }
+                }
+          
+        },
         Some("topic") => {
             
             info!("Topic request not implemented yet");
@@ -414,7 +435,7 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
     Ok(())
 }
 
-pub async fn start_mqtt_client() -> Result<(), Box<dyn Error>> {
+pub async fn start_mqtt_client(db: Arc<Graph>) -> Result<(), Box<dyn Error>> {
   
     let client_id = format!("rust-mqtt-server-{}", Uuid::new_v4());
     
@@ -503,17 +524,12 @@ pub async fn start_mqtt_client() -> Result<(), Box<dyn Error>> {
                     let payload = msg.payload.to_vec();
                    
 
-                    let db_ref = match get_db().await {
-                        Ok(db) => db,
-                        Err(e) => {
-                            error!("Database connection failed: {}", e);
-                            continue;
-                        },
-                    };
+                    
                     
                     // Processing it in a seperat Task 
+                    let db_clone = Arc::clone(&db); 
                     tokio::spawn(async move {
-                        if let Err(e) = process_request(&process_client, &payload, &db_ref).await {
+                        if let Err(e) = process_request(&process_client, &payload, &db_clone).await {
                             error!("❌ Failed to process request: {}", e);
                         }
                     });

@@ -1,18 +1,12 @@
 use crate::query::reset_database_and_set_topology;
-use crate::db::{get_read_db, get_db};
 use log::{error, info};
 use std::process::exit;
 
+use neo4rs::Graph;
+use std::sync::Arc;
 
 
-pub async fn router(command: &str) -> Result<bool, String> {
-    let db = match get_db().await {
-        Ok(db) => db,
-        Err(e) => {
-            error!("Failed to get database connection: {}", e);
-            return Err(format!("Failed to get database connection: {}", e));
-        },
-    };
+pub async fn router(command: &str, db: Arc<Graph>) -> Result<bool, String> {
     
     match command {
         "exit" => {
@@ -21,7 +15,7 @@ pub async fn router(command: &str) -> Result<bool, String> {
         }
         "reset" => {
             info!("Resetting the server...");
-            match reset_database_and_set_topology(db).await {
+            match reset_database_and_set_topology(&db).await {
                 Ok(_) => {
                     info!("Database reset successfully");
                     Ok(true)

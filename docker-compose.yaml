@@ -41,7 +41,7 @@ services:
       - app-network
 
   server1:
-    image: neo4j:5.25.1-enterprise
+    image: neo4j:5.26.4-enterprise
     container_name: server1
     hostname: server1
     environment:
@@ -58,6 +58,9 @@ services:
       - NEO4J_dbms_routing_default__router=SERVER
       - initial.dbms.default_primaries_count=1
       - initial.dbms.default_secondaries_count=2
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
     ports:
       - "7474:7474"
       - "7473:7473"
@@ -67,8 +70,9 @@ services:
     depends_on:
       - mqtt-broker
 
+
   server2:
-    image: neo4j:5.25.1-enterprise
+    image: neo4j:5.26.4-enterprise
     container_name: server2
     hostname: server2
     environment:
@@ -85,6 +89,9 @@ services:
       - NEO4J_dbms_routing_default__router=SERVER
       - initial.dbms.default_primaries_count=1
       - initial.dbms.default_secondaries_count=2
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
     ports:
       - "8474:7474"
       - "8473:7473"
@@ -93,9 +100,10 @@ services:
       - app-network
     depends_on:
       - server1
+    
 
   server3:
-    image: neo4j:5.25.1-enterprise
+    image: neo4j:5.26.4-enterprise
     container_name: server3
     hostname: server3
     environment:
@@ -112,6 +120,9 @@ services:
       - NEO4J_dbms_routing_default__router=SERVER
       - initial.dbms.default_primaries_count=1
       - initial.dbms.default_secondaries_count=2
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
     ports:
       - "9474:7474"
       - "9473:7473"
@@ -120,6 +131,7 @@ services:
       - app-network
     depends_on:
       - server2
+    
 
 networks:
   app-network:

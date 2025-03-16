@@ -14,3 +14,13 @@ CREATE FULLTEXT INDEX userSearchIndex FOR (n:User) ON EACH [n.name];
 CREATE INDEX user_unique_index FOR (n:User) ON (n.uuid, n.name, n.email);
 CREATE INDEX thread_tag_relationship_index FOR ()-[r:HAS_TAG]->() ON r.uuid
 
+
+
+
+CREATE INDEX FOR (u:UUID) ON (u.id);
+CREATE INDEX FOR (c:Color) ON (c.value);
+CREATE INDEX FOR (t:Temperature) ON (t.value);
+CREATE INDEX FOR (h:Humidity) ON (h.value);
+CREATE INDEX FOR (ts:Timestamp) ON (ts.value);
+CREATE INDEX FOR (ec:EnergyCost) ON (ec.value);
+CREATE INDEX FOR (e:EnergyConsume) ON (e.value);

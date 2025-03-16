@@ -3,6 +3,7 @@ use neo4rs::{Graph, Error as Neo4jError};
 use std::env;
 use tokio::sync::OnceCell;
 use std::fmt;
+use std::sync::Arc;
 
 pub static DB: OnceCell<DatabaseCluster> = OnceCell::const_new();
 
@@ -44,11 +45,11 @@ pub async fn initialize_db() -> Result<DatabaseCluster, DbError> {
     })?;
 
     let primary_nodes = vec![
-        connect_db(uri_server1).await?,
+        Arc::new(connect_db(uri_server1).await?),
     ];
     let secondary_nodes = vec![
-        connect_db(uri_server3).await?,
-        connect_db(uri_server2).await?,
+        Arc::new(connect_db(uri_server3).await?),
+        Arc::new(connect_db(uri_server2).await?),
     ];
 
     let cluster = DatabaseCluster {
@@ -79,12 +80,11 @@ async fn connect_db(uri_env: String) -> Result<Graph, DbError> {
     Ok(graph)
 }
 
-
-pub async fn get_db() -> Result<&'static Graph, DbError> {
+pub async fn get_db() -> Result<Arc<Graph>, DbError> {
     info!("get_db called");
     if let Some(cluster) = DB.get() {
         info!("get_db returning primary node");
-        return Ok(&cluster.primary_nodes[0]);
+        return Ok(Arc::clone(&cluster.primary_nodes[0]));
     }
 
     let cluster = initialize_db().await?;
@@ -94,15 +94,15 @@ pub async fn get_db() -> Result<&'static Graph, DbError> {
     })?;
 
     info!("get_db returning newly initialized primary node");
-    Ok(&DB.get().unwrap().primary_nodes[0])
+    Ok(Arc::clone(&DB.get().unwrap().primary_nodes[0]))
 }
 
-pub async fn get_read_db(number:usize) -> Result<&'static Graph, DbError> {
+pub async fn get_read_db(number: usize) -> Result<Arc<Graph>, DbError> {
     info!("get_read_db called");
     if let Some(cluster) = DB.get() {
         info!("get_read_db returning secondary node");
-
-        return Ok(&cluster.secondary_nodes[0]);
+        let index = number % cluster.secondary_nodes.len();
+        return Ok(Arc::clone(&cluster.secondary_nodes[index]));
     }
 
     let cluster = initialize_db().await?;
@@ -112,13 +112,15 @@ pub async fn get_read_db(number:usize) -> Result<&'static Graph, DbError> {
     })?;
 
     info!("get_read_db returning newly initialized secondary node");
-    Ok(&DB.get().unwrap().secondary_nodes[number])
+    let cluster = DB.get().unwrap();
+    let index = number % cluster.secondary_nodes.len();
+    Ok(Arc::clone(&cluster.secondary_nodes[index]))
 }
 
 #[derive(Clone)]
 pub struct DatabaseCluster {
-    primary_nodes: Vec<Graph>,
-    secondary_nodes: Vec<Graph>,
+    primary_nodes: Vec<Arc<Graph>>,
+    secondary_nodes: Vec<Arc<Graph>>,
 }
 
 impl std::fmt::Debug for DatabaseCluster {
@@ -129,9 +131,6 @@ impl std::fmt::Debug for DatabaseCluster {
             .finish()
     }
 }
-
-
-
 
 impl fmt::Display for DbError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

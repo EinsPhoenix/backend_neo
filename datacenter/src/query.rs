@@ -1,127 +1,116 @@
 use neo4rs::{Graph, query};
-use log::{error,info,warn};
-use serde_json::Value;
+use log::{error, info, warn};
+use serde_json::{json, Value};
 use std::collections::HashMap;
-use serde_json::json;
+use tokio;
 
 pub async fn create_new_relation(data: &Value, graph: &Graph) -> bool {
-    if let Some(data_array) = data.get("data").and_then(|d| d.as_array()) {
-        if data_array.is_empty() {
+    let data_array = match data.get("data").and_then(|d| d.as_array()) {
+        Some(array) if !array.is_empty() => array,
+        _ => {
+            error!("Not valid json data");
             return false;
         }
-        
-       
-        const BATCH_SIZE: usize = 200;
-        let mut success = false;
-        
-        for chunk in data_array.chunks(BATCH_SIZE) {
-            let mut neo4j_data = Vec::new();
-            
-            for item in chunk {
-                let mut record = HashMap::<String, String>::new();
+    };
 
-                if let Some(uuid) = item.get("uuid").and_then(|v| v.as_str()) {
-                    record.insert("uuid".to_string(), uuid.to_string());
-                }
-
-                if let Some(color) = item.get("color").and_then(|v| v.as_str()) {
-                    record.insert("color".to_string(), color.to_string());
-                }
-
-                if let Some(timestamp) = item.get("timestamp").and_then(|v| v.as_str()) {
-                    record.insert("timestamp".to_string(), timestamp.to_string());
-                }
-
-                if let Some(energy_consume) = item.get("energy_consume").and_then(|v| v.as_f64()) {
-                    let energy_consume_str = energy_consume.to_string();
-                    record.insert("energy_consume".to_string(), energy_consume_str);
-                }
-
-                if let Some(energy_cost) = item.get("energy_cost").and_then(|v| v.as_f64()) {
-                    let energy_cost_str = energy_cost.to_string();
-                    record.insert("energy_cost".to_string(), energy_cost_str);
-                }
-
-                if let Some(sensor_data) = item.get("sensor_data").and_then(|v| v.as_object()) {
-                    if let Some(temp) = sensor_data.get("temperature").and_then(|v| v.as_f64()) {
-                        let temp_str = temp.to_string();
-                        record.insert("sensor_data.temperature".to_string(), temp_str);
-                    }
-                    
-                    if let Some(humidity) = sensor_data.get("humidity").and_then(|v| v.as_f64()) {
-                        let humidity_str = humidity.to_string();
-                        record.insert("sensor_data.humidity".to_string(), humidity_str);
-                    }
-                }
-                
-                neo4j_data.push(record);
+    let neo4j_data: Vec<HashMap<String, Value>> = data_array.iter().map(|item| {
+        let mut record = HashMap::new();
+        if let Some(uuid) = item.get("uuid").and_then(|v| v.as_str()) {
+            record.insert("uuid".to_string(), Value::String(uuid.to_string()));
+        }
+        if let Some(color) = item.get("color").and_then(|v| v.as_str()) {
+            record.insert("color".to_string(), Value::String(color.to_string()));
+        }
+        if let Some(timestamp) = item.get("timestamp").and_then(|v| v.as_str()) {
+            record.insert("timestamp".to_string(), Value::String(timestamp.to_string()));
+        }
+        if let Some(energy_consume) = item.get("energy_consume").and_then(|v| v.as_f64()) {
+            if let Some(num) = serde_json::Number::from_f64(energy_consume) {
+                record.insert("energy_consume".to_string(), Value::Number(num));
             }
-            
-            let creation_query = query(r#"
-            UNWIND $data AS record
-            
-            OPTIONAL MATCH (existingUuid:UUID {id: record.uuid})
-            WITH record, existingUuid
-            WHERE existingUuid IS NULL
-            
-            MERGE (uuid:UUID {id: record.uuid})
-            SET uuid.energy_consume = toFloat(record.energy_consume),
-                uuid.energy_cost = toFloat(record.energy_cost)
-            
-            MERGE (color:Color {value: record.color})
-            MERGE (uuid)-[:HAS_COLOR]->(color)
-            
-            MERGE (temperature:Temperature {value: toFloat(record.`sensor_data.temperature`)})
-            MERGE (uuid)-[:HAS_TEMPERATURE]->(temperature)
-            
-            MERGE (humidity:Humidity {value: toFloat(record.`sensor_data.humidity`)})
-            MERGE (uuid)-[:HAS_HUMIDITY]->(humidity)
-            
-            MERGE (timestamp:Timestamp {value: record.timestamp})
-            MERGE (uuid)-[:HAS_TIMESTAMP]->(timestamp)
-            
-            MERGE (timestamp)-[:SENSOR_DATA]->(temperature)
-            MERGE (timestamp)-[:SENSOR_DATA]->(humidity)
-            
-            MERGE (energyCost:EnergyCost {value: toFloat(record.energy_cost)})
-            MERGE (uuid)-[:HAS_ENERGYCOST]->(energyCost)
-            MERGE (timestamp)-[:HAS_PRICE]->(energyCost)
-            
-            MERGE (energyConsume:EnergyConsume {value: toFloat(record.energy_consume)})
-            MERGE (uuid)-[:HAS_ENERGYCONSUME]->(energyConsume)
-            
-            WITH uuid
-            RETURN uuid.id AS processed_uuid
-            "#)
-            .param("data", neo4j_data);
-
-            match graph.execute(creation_query).await {
-                Ok(mut result) => {
-                   
-                    let mut processed_count = 0;
-                    while let Ok(Some(_)) = result.next().await {
-                        processed_count += 1;
-                    }
-                    
-                    if processed_count > 0 {
-                        success = true;
-                        info!("Processed {} nodes in batch", processed_count);
-                    } else {
-                        warn!("No new nodes were created in this batch (UUIDs might already exist)");
-                    }
-                },
-                Err(e) => {
-                    error!("Failed to execute Neo4j query for batch: {}", e);
+        }
+        if let Some(energy_cost) = item.get("energy_cost").and_then(|v| v.as_f64()) {
+            if let Some(num) = serde_json::Number::from_f64(energy_cost) {
+                record.insert("energy_cost".to_string(), Value::Number(num));
+            }
+        }
+        if let Some(sensor_data) = item.get("sensor_data").and_then(|v| v.as_object()) {
+            if let Some(temp) = sensor_data.get("temperature").and_then(|v| v.as_f64()) {
+                if let Some(num) = serde_json::Number::from_f64(temp) {
+                    record.insert("sensor_data.temperature".to_string(), Value::Number(num));
+                }
+            }
+            if let Some(humidity) = sensor_data.get("humidity").and_then(|v| v.as_f64()) {
+                if let Some(num) = serde_json::Number::from_f64(humidity) {
+                    record.insert("sensor_data.humidity".to_string(), Value::Number(num));
                 }
             }
         }
-        
-        success
-    } else {
-        error!("Invalid JSON structure: 'data' array not found");
-        false
+        record
+    }).collect();
+
+    let json_data = match serde_json::to_string(&neo4j_data) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to serialieze: {}", e);
+            return false;
+        }
+    };
+
+
+    let creation_query = query(r#"
+        WITH apoc.convert.fromJsonList($data) AS records
+        UNWIND records AS record
+        OPTIONAL MATCH (existingUuid:UUID {id: record.uuid})
+        WITH record, existingUuid
+        WHERE existingUuid IS NULL
+        MERGE (uuid:UUID {id: record.uuid})
+        SET uuid.energy_consume = record.energy_consume,
+            uuid.energy_cost = record.energy_cost
+        MERGE (color:Color {value: record.color})
+        MERGE (uuid)-[:HAS_COLOR]->(color)
+        MERGE (temperature:Temperature {value: record.`sensor_data.temperature`})
+        MERGE (uuid)-[:HAS_TEMPERATURE]->(temperature)
+        MERGE (humidity:Humidity {value: record.`sensor_data.humidity`})
+        MERGE (uuid)-[:HAS_HUMIDITY]->(humidity)
+        MERGE (timestamp:Timestamp {value: record.timestamp})
+        MERGE (uuid)-[:HAS_TIMESTAMP]->(timestamp)
+        MERGE (timestamp)-[:SENSOR_DATA]->(temperature)
+        MERGE (timestamp)-[:SENSOR_DATA]->(humidity)
+        MERGE (energyCost:EnergyCost {value: record.energy_cost})
+        MERGE (uuid)-[:HAS_ENERGYCOST]->(energyCost)
+        MERGE (timestamp)-[:HAS_PRICE]->(energyCost)
+        MERGE (energyConsume:EnergyConsume {value: record.energy_consume})
+        MERGE (uuid)-[:HAS_ENERGYCONSUME]->(energyConsume)
+        WITH uuid
+        RETURN uuid.id AS processed_uuid
+    "#)
+    .param("data", json_data);
+
+
+    match graph.execute(creation_query).await {
+        Ok(mut result) => {
+            let mut processed_count = 0;
+            while let Ok(Some(_)) = result.next().await {
+                processed_count += 1;
+            }
+            if processed_count > 0 {
+                info!("processesed: {} Node", processed_count);
+                true
+            } else {
+                warn!("No new Nodes where created (UUIDs könnten bereits existieren)");
+                false
+            }
+        }
+        Err(e) => {
+            error!("Failed to execute Neo4j query: {}", e);
+            false
+        }
     }
 }
+
+
+
 
 
 
@@ -147,7 +136,7 @@ pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> 
     match graph.execute(query).await {
         Ok(mut result) => {
             if let Ok(Some(row)) = result.next().await {
-                // Extract values from the query result
+                
                 let uuid_val: String = row.get("uuid").unwrap_or_default();
                 let color_val: String = row.get("color").unwrap_or_default();
                 let sensor_data: Value = row.get("sensor_data").unwrap_or(json!({}));
@@ -155,7 +144,6 @@ pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> 
                 let energy_consume: f64 = row.get("energy_consume").unwrap_or(0.0);
                 let energy_cost: f64 = row.get("energy_cost").unwrap_or(0.0);
 
-                // Construct the final JSON object
                 Some(json!({
                     "uuid": uuid_val,
                     "color": color_val,
@@ -257,7 +245,7 @@ pub async fn get_temperature_humidity_at_time(graph: &Graph, timestamp: &str) ->
             None
         }
         Err(e) => {
-            error!("Fehler beim Abrufen der Sensordaten: {}", e);
+            error!("Failed to execute Neo4j query: {}", e);
             None
         }
     }
@@ -387,6 +375,31 @@ pub async fn get_nodes_with_color(color: &str, graph: &Graph) -> Option<Value> {
     }
 }
 
+
+pub async fn get_newest_uuid(graph: &Graph) -> Option<Value> {
+    let query = query(r#"
+        MATCH (uuidNode:UUID)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
+        WITH uuidNode, timestamp
+        ORDER BY timestamp.value DESC
+        RETURN uuidNode.id AS uuid
+        LIMIT 50
+    "#);
+    
+    match graph.execute(query).await {
+        Ok(mut result) => {
+            let mut uuids = Vec::new();
+            while let Ok(Some(row)) = result.next().await {
+                let node: Value = row.get("uuid").unwrap();
+                uuids.push(node);
+            }
+            Some(json!(uuids))
+        },
+        Err(e) => {
+            error!("Failed to execute Neo4j query: {}", e);
+            None
+        }
+    }
+}
 
 
 pub async fn reset_database_and_set_topology(graph: &Graph) -> Result<bool, String> {

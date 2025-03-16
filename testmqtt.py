@@ -22,6 +22,8 @@ class MqttClient:
         self.client_id = client_name or f"python-client-{str(uuid.uuid4())[:8]}"
         self.received_response = None
         self.response_received = threading.Event()
+        self.start_time = None
+        self.first_response_time = None
 
         self.paginated_messages = {}
         self.client = mqtt.Client(client_id=self.client_id)
@@ -39,6 +41,10 @@ class MqttClient:
 
     def on_message(self, client, userdata, msg):
         try:
+            # Record the time of the first received message
+            if self.first_response_time is None:
+                self.first_response_time = time.time()
+
             payload = json.loads(msg.payload.decode())
 
             # Handle paginated messages
@@ -178,8 +184,8 @@ class MqttClient:
     def send_request(self, query_data, response_suffix, timeout=15):
         self.response_received.clear()
         self.received_response = None
-        # Reset paginated message tracking
         self.paginated_messages = {}
+        self.first_response_time = None  # Reset first response time tracker
 
         try:
             self.client.connect(BROKER, PORT)
@@ -193,12 +199,10 @@ class MqttClient:
                 )
 
             # Subscribe to all the possible topic patterns
-
             page_wildcard = f"{response_topic}/page/#"
             summary_topic = f"{response_topic}/summary"
 
             self.client.subscribe(response_topic)
-
             self.client.subscribe(page_wildcard)
             self.client.subscribe(summary_topic)
 
@@ -210,7 +214,8 @@ class MqttClient:
             # Add client_id to query data
             query_data["client_id"] = self.client_id
 
-            # Send request
+            # Send request and record start time
+            self.start_time = time.time()
             self.client.publish(REQUEST_TOPIC, json.dumps(query_data))
 
             with self.lock:
@@ -222,15 +227,34 @@ class MqttClient:
             timeout = 30 if "all" in response_suffix else timeout
             result = self.response_received.wait(timeout)
 
-            if not result:
-                with self.lock:
-                    print(f"⌛ Client {self.client_id} timeout: No response received")
+            # Calculate and print the elapsed time
+            elapsed_time = None
+            if self.first_response_time is not None:
+                elapsed_time = self.first_response_time - self.start_time
+
+            with self.lock:
+                if elapsed_time is not None:
+                    print(
+                        f"⏱️ Client {self.client_id} first response received in {elapsed_time:.3f} seconds"
+                    )
+                else:
+                    print(f"⏱️ Client {self.client_id} did not receive any response")
+
+                if result:
+                    print(f"✅ Client {self.client_id} received complete response")
+                else:
+                    print(
+                        f"⌛ Client {self.client_id} timed out after {timeout} seconds"
+                    )
 
             return self.received_response
 
         finally:
             self.client.loop_stop()
             self.client.disconnect()
+
+
+# The rest of the code (run_test_client, run_multiple_clients, and main block) remains unchanged
 
 
 def run_test_client(client_name, request_type, params):
@@ -273,6 +297,9 @@ def run_test_client(client_name, request_type, params):
         return client.send_request(
             {"request": "energy_consume", "data": consume}, "energy_consume"
         )
+    elif request_type == "newest":
+
+        return client.send_request({"request": "newest", "data": ""}, "newest")
 
 
 def run_multiple_clients(num_clients=2, test_type=None):
@@ -286,6 +313,7 @@ def run_multiple_clients(num_clients=2, test_type=None):
         "timestamp",
         "energy_cost",
         "energy_consume",
+        "newest",
     ]
 
     if test_type and test_type not in test_types:
@@ -320,6 +348,8 @@ def run_multiple_clients(num_clients=2, test_type=None):
             params["cost"] = 0.20 + (i * 0.05)
         elif selected_test == "energy_consume":
             params["consume"] = 100.0 + (i * 50.0)
+        elif selected_test == "newest":
+            params["newest"] = ""
 
         tasks.append((client_name, selected_test, params))
 
@@ -332,7 +362,6 @@ def run_multiple_clients(num_clients=2, test_type=None):
             for name, test, params in tasks
         ]
 
-        # Wait for all to complete
         for future in futures:
             future.result()
 
@@ -356,6 +385,7 @@ if __name__ == "__main__":
             "timestamp",
             "energy_cost",
             "energy_consume",
+            "newest",
         ],
         help="Specific test to run (if not specified, random tests will be chosen)",
     )

@@ -12,7 +12,7 @@ start_time = datetime(2025, 3, 10, 14, 30)
 
 data_entries = []
 
-for i in range(40000):
+for i in range(30000):
     entry = {
         "uuid": str(uuid.uuid4()),
         "color": random.choice(colors),
