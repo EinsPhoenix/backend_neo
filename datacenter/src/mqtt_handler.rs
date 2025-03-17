@@ -1,13 +1,13 @@
-use rumqttc::{MqttOptions, AsyncClient, Event, Incoming, QoS, Transport};
+use rumqttc::{MqttOptions, AsyncClient, Event, Incoming, QoS};
 use tokio::time::{Duration, Instant};
 use log::{info, error, warn};
-use serde_json::{Value, Result as JsonResult, json};
+use serde_json::{Value, json};
 use std::env;
 use std::error::Error;
 use uuid::Uuid;
 use crate::query::{get_newest_uuid,get_specific_uuid_node,get_all_uuid_nodes,get_nodes_with_color,get_nodes_in_time_range,get_nodes_with_temperature_or_humidity,get_temperature_humidity_at_time,get_nodes_with_energy_cost,get_nodes_with_energy_consume};
-use crate::db::get_db;
-use neo4rs::Graph;
+use crate::db;
+
 
 use tokio::time; 
 use chrono;
@@ -156,7 +156,7 @@ async fn publish_result(client: &AsyncClient, topic: &str, payload: &Value) -> R
 }
 
 
-async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Result<(), Box<dyn Error>> {
+async fn process_request(client: &AsyncClient, payload: &[u8], db_handler: &Arc<db::DatabaseCluster>) -> Result<(), Box<dyn Error>> {
     let payload_str = String::from_utf8_lossy(payload);
     info!("Received request: {}", payload_str);
     
@@ -177,9 +177,12 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
             return Err("Missing client_id".into());
         }
     };
-    
+    let read_conn_1 = db_handler.get_read_db(0);
+    let read_conn_2 = db_handler.get_read_db(1);
+    let write_conn = db_handler.get_primary_db();
     // Request-Typ 
     match json_value.get("request").and_then(Value::as_str) {
+        
         Some("uuid") => {
             info!("Processing UUID request for client: {}", requesting_client_id);
             
@@ -193,8 +196,8 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
                          
                             let response_topic = format!("rust/uuid/{}", requesting_client_id);
                             
-                            
-                            match get_specific_uuid_node(uuid, db).await {
+                            match get_specific_uuid_node(uuid, &read_conn_1).await {
+    
                                 Some(node) => {
                                     info!("Found node for UUID {}: {:?}", uuid, node);
                                     publish_result(client, &response_topic, &node).await?;
@@ -222,7 +225,8 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
         },
         Some("all") => {
             info!("Processing 'all' request for Client-ID: {}", requesting_client_id);
-            match get_all_uuid_nodes(db).await {
+            
+            match get_all_uuid_nodes(&read_conn_2).await {
                 Some(all_nodes) => {
                     let response_topic = format!("rust/response/{}/all", requesting_client_id);
                     publish_result(client, &response_topic, &all_nodes).await?;
@@ -241,7 +245,8 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
         Some("color") => {
             info!("Processing 'color' data for Client-ID: {}", requesting_client_id);
             if let Some(color_data) = json_value.get("data").and_then(Value::as_str) {
-                match get_nodes_with_color(color_data, db).await {
+                
+                match get_nodes_with_color(color_data, &read_conn_2).await {
                     Some(processed) => {
                         let response_topic = format!("rust/response/{}/color", requesting_client_id);
                         publish_result(client, &response_topic, &processed).await?;
@@ -266,7 +271,7 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
             let end = json_value.get("end").and_then(Value::as_str);
             
             if let (Some(start_time), Some(end_time)) = (start, end) {
-                match get_nodes_in_time_range(start_time, end_time, db).await {
+                match get_nodes_in_time_range(start_time, end_time, &read_conn_1).await {
                     Some(nodes) => {
                         let response_topic = format!("rust/response/{}/time_range", requesting_client_id);
                         publish_result(client, &response_topic, &nodes).await?;
@@ -292,7 +297,7 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
             let humidity = json_value.get("humidity").and_then(Value::as_f64);
             
             if let (Some(temp_val), Some(humidity_val)) = (temp, humidity) {
-                match get_nodes_with_temperature_or_humidity(temp_val, humidity_val, db).await {
+                match get_nodes_with_temperature_or_humidity(temp_val, humidity_val, &read_conn_1).await {
                     Some(nodes) => {
                         let response_topic = format!("rust/response/{}/temperature_humidity", requesting_client_id);
                         publish_result(client, &response_topic, &nodes).await?;
@@ -315,7 +320,7 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
         Some("timestamp") => {
             info!("Processing 'timestamp' data for Client-ID: {}", requesting_client_id);
             if let Some(timestamp) = json_value.get("data").and_then(Value::as_str) {
-                match get_temperature_humidity_at_time(db, timestamp).await {
+                match get_temperature_humidity_at_time(&read_conn_1, timestamp).await {
                     Some((temp, humidity)) => {
                         let response = json!({
                             "timestamp": timestamp,
@@ -343,7 +348,7 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
         Some("energy_cost") => {
             info!("Processing 'energy_cost' data for Client-ID: {}", requesting_client_id);
             if let Some(cost) = json_value.get("data").and_then(Value::as_f64) {
-                match get_nodes_with_energy_cost(cost, db).await {
+                match get_nodes_with_energy_cost(cost, &read_conn_2).await {
                     Some(nodes) => {
                         let response_topic = format!("rust/response/{}/energy_cost", requesting_client_id);
                         publish_result(client, &response_topic, &nodes).await?;
@@ -365,7 +370,7 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
         Some("energy_consume") => {
             info!("Processing 'energy_consume' data for Client-ID: {}", requesting_client_id);
             if let Some(consume) = json_value.get("data").and_then(Value::as_f64) {
-                match get_nodes_with_energy_consume(consume, db).await {
+                match get_nodes_with_energy_consume(consume, &read_conn_2).await {
                     Some(nodes) => {
                         let response_topic = format!("rust/response/{}/energy_consume", requesting_client_id);
                         publish_result(client, &response_topic, &nodes).await?;
@@ -388,7 +393,7 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
         Some("newest") => {
             
 
-                match get_newest_uuid(db).await {
+                match get_newest_uuid(&read_conn_1).await {
                     Some(nodes) => {
                         let response_topic = format!("rust/response/{}/newest", requesting_client_id);
                         publish_result(client, &response_topic, &nodes).await?;
@@ -435,7 +440,7 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db: &Graph) -> Re
     Ok(())
 }
 
-pub async fn start_mqtt_client(db: Arc<Graph>) -> Result<(), Box<dyn Error>> {
+pub async fn start_mqtt_client(db_handler: Arc<db::DatabaseCluster>) -> Result<(), Box<dyn Error>> {
   
     let client_id = format!("rust-mqtt-server-{}", Uuid::new_v4());
     
@@ -527,9 +532,10 @@ pub async fn start_mqtt_client(db: Arc<Graph>) -> Result<(), Box<dyn Error>> {
                     
                     
                     // Processing it in a seperat Task 
-                    let db_clone = Arc::clone(&db); 
+                    let db_handler_clone = Arc::clone(&db_handler); 
+               
                     tokio::spawn(async move {
-                        if let Err(e) = process_request(&process_client, &payload, &db_clone).await {
+                        if let Err(e) = process_request(&process_client, &payload, &db_handler_clone).await {
                             error!("❌ Failed to process request: {}", e);
                         }
                     });

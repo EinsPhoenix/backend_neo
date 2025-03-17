@@ -1,21 +1,44 @@
-use crate::query::reset_database_and_set_topology;
+use crate::query::{index_database, reset_database, alter_database};
 use log::{error, info};
 use std::process::exit;
-
-use neo4rs::Graph;
 use std::sync::Arc;
+use crate::db;
 
-
-pub async fn router(command: &str, db: Arc<Graph>) -> Result<bool, String> {
-    
+pub async fn router(command: &str, db_handler: Arc<db::DatabaseCluster>) -> Result<bool, String> {
     match command {
         "exit" => {
             info!("Exiting application...");
             exit(0);
         }
+        "init" => {
+            info!("Initializing the server...");
+            let db = db_handler.get_system_db();
+            match alter_database(&db).await {
+                Ok(_) => {
+                    info!("Database schema altered successfully");
+                },
+                Err(e) => {
+                    error!("Failed to alter database schema: {}", e);
+                    return Err(format!("Failed to alter database schema: {}", e));
+                }
+            }
+            
+            let write_db = db_handler.get_primary_db();
+            match index_database(&write_db).await {
+                Ok(_) => {
+                    info!("Database indexed successfully");
+                    Ok(true)
+                },
+                Err(e) => {
+                    error!("Failed to index database: {}", e);
+                    Err(format!("Failed to index database: {}", e))
+                }
+            }
+        }
         "reset" => {
             info!("Resetting the server...");
-            match reset_database_and_set_topology(&db).await {
+            let db = db_handler.get_system_db();
+            match reset_database(&db).await {
                 Ok(_) => {
                     info!("Database reset successfully");
                     Ok(true)
@@ -25,6 +48,11 @@ pub async fn router(command: &str, db: Arc<Graph>) -> Result<bool, String> {
                     Err(format!("Failed to reset database: {}", e))
                 }
             }
+        }
+
+        "help" => {
+            info!("Available commands: exit, init, help, status");
+            Ok(true)
         }
         "status" => {
             Ok(true)

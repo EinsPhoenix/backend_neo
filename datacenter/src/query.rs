@@ -2,7 +2,6 @@ use neo4rs::{Graph, query};
 use log::{error, info, warn};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tokio;
 
 pub async fn create_new_relation(data: &Value, graph: &Graph) -> bool {
     let data_array = match data.get("data").and_then(|d| d.as_array()) {
@@ -401,8 +400,60 @@ pub async fn get_newest_uuid(graph: &Graph) -> Option<Value> {
     }
 }
 
+// Here are command functions
 
-pub async fn reset_database_and_set_topology(graph: &Graph) -> Result<bool, String> {
+pub async fn alter_database(graph: &Graph) -> Result<bool, String> {
+    
+    let delete_query = query(r#"
+       
+        ALTER DATABASE neo4j SET TOPOLOGY 1 PRIMARIES 2 SECONDARIES;
+      
+    "#);
+
+    match graph.execute(delete_query).await {
+        Ok(_) => {
+            log::info!("Database successfully altered");
+            Ok(true)
+        },
+        Err(e) => {
+            let error_msg = format!("There was an issue altering the database {}", e);
+            error!("{}", error_msg);
+            return Err(error_msg);
+        }
+    }
+
+}
+
+pub async fn index_database(graph: &Graph) -> Result<bool, String> {
+   
+    let index_statements = [
+        "CREATE INDEX FOR (u:UUID) ON (u.id)",
+        "CREATE INDEX FOR (c:Color) ON (c.value)",
+        "CREATE INDEX FOR (t:Temperature) ON (t.value)",
+        "CREATE INDEX FOR (h:Humidity) ON (h.value)",
+        "CREATE INDEX FOR (ts:Timestamp) ON (ts.value)",
+        "CREATE INDEX FOR (ec:EnergyCost) ON (ec.value)",
+        "CREATE INDEX FOR (e:EnergyConsume) ON (e.value)"
+    ];
+    
+    for statement in index_statements {
+        match graph.execute(query(statement)).await {
+            Ok(_) => {
+                log::info!("Created index: {}", statement);
+            },
+            Err(e) => {
+                let error_msg = format!("Failed to create index '{}': {}", statement, e);
+                error!("{}", error_msg);
+                return Err(error_msg);
+            }
+        }
+    }
+    
+    log::info!("Database successfully INDEXED");
+    Ok(true)
+}
+
+pub async fn reset_database(graph: &Graph) -> Result<bool, String> {
     
     let delete_query = query(r#"
         MATCH (n)
@@ -411,29 +462,13 @@ pub async fn reset_database_and_set_topology(graph: &Graph) -> Result<bool, Stri
 
     match graph.execute(delete_query).await {
         Ok(_) => {
-            log::info!("Alle Nodes und Relationen wurden erfolgreich gelöscht");
-        },
-        Err(e) => {
-            let error_msg = format!("Fehler beim Löschen der Nodes und Relationen: {}", e);
-            error!("{}", error_msg);
-            return Err(error_msg);
-        }
-    }
-
-    
-    let topology_query = query(r#"
-        ALTER DATABASE neo4j SET TOPOLOGY 1 PRIMARIES 2 SECONDARIES
-    "#);
-
-    match graph.execute(topology_query).await {
-        Ok(_) => {
-            log::info!("Topologie erfolgreich auf 1 PRIMARY und 2 SECONDARY gesetzt");
+            log::info!("All nodes succesfully deleted");
             Ok(true)
         },
         Err(e) => {
-            let error_msg = format!("Fehler beim Setzen der Topologie: {}", e);
+            let error_msg = format!("There was a misstake: {}", e);
             error!("{}", error_msg);
-            Err(error_msg)
+            return Err(error_msg);
         }
     }
 }

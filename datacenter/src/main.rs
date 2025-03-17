@@ -1,11 +1,10 @@
 use log::{info, error};
-use neo4rs::Graph;
 use dotenv::dotenv;
 use std::env;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::io;
-use serde_json::{Value, Error as JsonError};
+use serde_json::Value;
 use std::sync::Arc; 
 
 mod db;
@@ -23,20 +22,14 @@ async fn main() -> io::Result<()> {
         eprintln!("Logger already initialized.");
     }
     info!("Starting the server...");
-    
-    // Get the database connection
-    let db = match db::get_db().await {
-        Ok(db) => db, 
-        Err(e) => {
-            error!("Failed to get database connection: {}", e);
-            return Err(io::Error::new(io::ErrorKind::Other, format!("Database connection failed: {}", e)));
-        },
-    };
 
+    let db_handler = db::get_database().await.unwrap();
+    
    
-    let db_clone = Arc::clone(&db);
+    let db_mqtt_handler_clone = Arc::clone(&db_handler);
+
     tokio::spawn(async move {
-        if let Err(e) = mqtt_handler::start_mqtt_client(db_clone).await {
+        if let Err(e) = mqtt_handler::start_mqtt_client(db_mqtt_handler_clone).await {
             error!("MQTT client error: {:?}", e);
         }
     });
@@ -50,10 +43,10 @@ async fn main() -> io::Result<()> {
             Ok((socket, addr)) => {
                 info!("New connection from: {}", addr);
                 let password_clone = password.clone();
-                let db_clone = Arc::clone(&db);
-                
+               
+                let db_handler_clone = Arc::clone(&db_handler);
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(socket, password_clone, db_clone).await {
+                    if let Err(e) = handle_client(socket, password_clone, db_handler_clone).await {
                         error!("Error handling client {}: {:?}", addr, e);
                     }
                 });
@@ -66,7 +59,7 @@ async fn main() -> io::Result<()> {
 async fn handle_client(
     mut socket: TcpStream,
     correct_password: String,
-    db: Arc<Graph>  
+    db_handler: Arc<db::DatabaseCluster> 
 ) -> io::Result<()> {
     if !auth::authenticate_client(&mut socket, &correct_password).await? {
         return Ok(());
@@ -75,7 +68,7 @@ async fn handle_client(
     loop {
         match receive_json(&mut socket).await {
             Ok(Some(json)) => {
-                json_handler::process_json(&json, Arc::clone(&db)).await;
+                json_handler::process_json(&json, Arc::clone(&db_handler)).await;
             },
             Ok(None) => {
                 info!("Client disconnected.");
