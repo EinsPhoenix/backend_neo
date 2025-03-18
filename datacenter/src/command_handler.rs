@@ -12,7 +12,7 @@ pub async fn router(command: &str, db_handler: Arc<db::DatabaseCluster>) -> Resu
         }
         "init" => {
             info!("Initializing the server...");
-            let db = db_handler.get_system_db();
+            let db = db_handler.get_system_db().await;
             match alter_database(&db).await {
                 Ok(_) => {
                     info!("Database schema altered successfully");
@@ -23,7 +23,7 @@ pub async fn router(command: &str, db_handler: Arc<db::DatabaseCluster>) -> Resu
                 }
             }
             
-            let write_db = db_handler.get_primary_db();
+            let write_db = db_handler.get_primary_db().await;
             match index_database(&write_db).await {
                 Ok(_) => {
                     info!("Database indexed successfully");
@@ -37,7 +37,7 @@ pub async fn router(command: &str, db_handler: Arc<db::DatabaseCluster>) -> Resu
         }
         "reset" => {
             info!("Resetting the server...");
-            let db = db_handler.get_system_db();
+            let db = db_handler.get_system_db().await;
             match reset_database(&db).await {
                 Ok(_) => {
                     info!("Database reset successfully");

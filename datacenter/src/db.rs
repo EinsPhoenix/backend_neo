@@ -90,16 +90,16 @@ impl DatabaseCluster {
         Ok(graph)
     }
 
-    pub fn get_primary_db(&self) -> Arc<Graph> {
+    pub async fn get_primary_db(&self) -> Arc<Graph> {
         Arc::clone(&self.primary_nodes[0])
     }
 
-    pub fn get_read_db(&self, number: usize) -> Arc<Graph> {
+    pub async fn get_read_db(&self, number: usize) -> Arc<Graph> {
         let index = number % self.secondary_nodes.len();
         Arc::clone(&self.secondary_nodes[index])
     }
     
-    pub fn get_system_db(&self) -> Arc<Graph> {
+    pub async fn get_system_db(&self) -> Arc<Graph> {
         Arc::clone(&self.system_nodes[0])
     }
 }

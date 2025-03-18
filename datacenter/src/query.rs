@@ -3,13 +3,50 @@ use log::{error, info, warn};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-pub async fn create_new_relation(data: &Value, graph: &Graph) -> bool {
+//validate function
+
+async fn validate_data(data: &Value) -> bool {
     let data_array = match data.get("data").and_then(|d| d.as_array()) {
-        Some(array) if !array.is_empty() => array,
+        Some(array) => array,
         _ => {
-            error!("Not valid json data");
+            error!("Invalid array");
             return false;
         }
+    };
+
+    for item in data_array {
+        if !validate_item(item).await {
+            error!("Invalid item in data array: {:?}", item);
+            return false;
+        }
+    }
+
+    true
+}
+
+async fn validate_item(item: &Value) -> bool {
+    item.get("uuid").and_then(|v| v.as_str()).is_some()
+        && item.get("color").and_then(|v| v.as_str()).is_some()
+        && item.get("sensor_data").map(|v| v.is_object()).unwrap_or(false)
+        && item.get("sensor_data").and_then(|sd| sd.get("temperature")).and_then(|t| t.as_f64()).is_some()
+        && item.get("sensor_data").and_then(|sd| sd.get("humidity")).and_then(|h| h.as_f64()).is_some() 
+        && item.get("timestamp").and_then(|v| v.as_str()).is_some()
+        && item.get("energy_consume").and_then(|v| v.as_f64()).is_some()
+        && item.get("energy_cost").and_then(|v| v.as_f64()).is_some()
+}
+
+//create function
+pub async fn create_new_relation(data: &Value, graph: &Graph) -> Result<bool, String> {
+    if !validate_data(data).await {
+        return Err("Data validation failed".to_string());
+    }
+
+    let data_array = match data.get("data") {
+        Some(data) => match data.as_array() {
+            Some(array) => array,
+            None => return Err("'data' field is not an array".to_string())
+        },
+        None => return Err("'data' field is missing".to_string())
     };
 
     let neo4j_data: Vec<HashMap<String, Value>> = data_array.iter().map(|item| {
@@ -51,11 +88,11 @@ pub async fn create_new_relation(data: &Value, graph: &Graph) -> bool {
     let json_data = match serde_json::to_string(&neo4j_data) {
         Ok(s) => s,
         Err(e) => {
-            error!("Failed to serialieze: {}", e);
-            return false;
+            let error_msg = format!("Failed to serialize data: {}", e);
+            error!("{}", error_msg);
+            return Err(error_msg);
         }
     };
-
 
     let creation_query = query(r#"
         WITH apoc.convert.fromJsonList($data) AS records
@@ -81,11 +118,9 @@ pub async fn create_new_relation(data: &Value, graph: &Graph) -> bool {
         MERGE (timestamp)-[:HAS_PRICE]->(energyCost)
         MERGE (energyConsume:EnergyConsume {value: record.energy_consume})
         MERGE (uuid)-[:HAS_ENERGYCONSUME]->(energyConsume)
-        WITH uuid
         RETURN uuid.id AS processed_uuid
     "#)
     .param("data", json_data);
-
 
     match graph.execute(creation_query).await {
         Ok(mut result) => {
@@ -94,16 +129,18 @@ pub async fn create_new_relation(data: &Value, graph: &Graph) -> bool {
                 processed_count += 1;
             }
             if processed_count > 0 {
-                info!("processesed: {} Node", processed_count);
-                true
+                info!("Processed: {} Node(s)", processed_count);
+                Ok(true)
             } else {
-                warn!("No new Nodes where created (UUIDs könnten bereits existieren)");
-                false
+                let warning_msg = "No new Nodes were created (UUIDs might already exist)";
+                warn!("{}", warning_msg);
+                Ok(false)
             }
         }
         Err(e) => {
-            error!("Failed to execute Neo4j query: {}", e);
-            false
+            let error_msg = format!("Failed to execute Neo4j query: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
         }
     }
 }
@@ -118,17 +155,18 @@ pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> 
         MATCH (uuidNode:UUID {id: $uuid})
         OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
         OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
-        WITH uuidNode, color, timestamp
+        OPTIONAL MATCH (uuidNode)-[:HAS_TEMPERATURE]->(temp:Temperature)
+        OPTIONAL MATCH (uuidNode)-[:HAS_HUMIDITY]->(humidity:Humidity)
+        WITH uuidNode, color, timestamp, temp, humidity
         ORDER BY timestamp.value DESC
         LIMIT 1
-        OPTIONAL MATCH (timestamp)-[:SENSOR_DATA]->(temp:Temperature)
-        OPTIONAL MATCH (timestamp)-[:SENSOR_DATA]->(humidity:Humidity)
         RETURN uuidNode.id AS uuid,
                color.value AS color,
                { temperature: temp.value, humidity: humidity.value } AS sensor_data,
                timestamp.value AS timestamp,
                uuidNode.energy_consume AS energy_consume,
                uuidNode.energy_cost AS energy_cost
+
     "#)
     .param("uuid", uuid);
 
@@ -169,25 +207,26 @@ pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> 
 pub async fn get_all_uuid_nodes(graph: &Graph) -> Option<Value> {
     let query = query(r#"
         MATCH (uuidNode:UUID)
-OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
-OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
-WITH uuidNode, color, timestamp
-ORDER BY timestamp.value DESC
-WITH uuidNode, color, HEAD(COLLECT(timestamp)) AS latest_timestamp
-OPTIONAL MATCH (latest_timestamp)-[:SENSOR_DATA]->(temp:Temperature)
-OPTIONAL MATCH (latest_timestamp)-[:SENSOR_DATA]->(humidity:Humidity)
-WITH uuidNode, 
-     color, 
-     latest_timestamp, 
-     HEAD(COLLECT(temp)) AS temp, 
-     HEAD(COLLECT(humidity)) AS humidity
-RETURN uuidNode.id AS uuid,
-       color.value AS color,
-       { temperature: temp.value, humidity: humidity.value } AS sensor_data,
-       latest_timestamp.value AS timestamp,
-       uuidNode.energy_consume AS energy_consume,
-       uuidNode.energy_cost AS energy_cost
+        OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
+        OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
+        OPTIONAL MATCH (uuidNode)-[:HAS_TEMPERATURE]->(temp:Temperature)
+        OPTIONAL MATCH (uuidNode)-[:HAS_HUMIDITY]->(humidity:Humidity)
 
+        WITH uuidNode, color, timestamp, temp, humidity
+        ORDER BY timestamp.value DESC
+
+        WITH uuidNode, 
+            color.value AS color, 
+            timestamp.value AS latest_timestamp, 
+            temp.value AS temperature, 
+            humidity.value AS humidity
+
+        RETURN uuidNode.id AS uuid,
+            color,
+            { temperature: temperature, humidity: humidity } AS sensor_data,
+            latest_timestamp AS timestamp,
+            uuidNode.energy_consume AS energy_consume,
+            uuidNode.energy_cost AS energy_cost
     "#);
 
     match graph.execute(query).await {
@@ -456,8 +495,7 @@ pub async fn index_database(graph: &Graph) -> Result<bool, String> {
 pub async fn reset_database(graph: &Graph) -> Result<bool, String> {
     
     let delete_query = query(r#"
-        MATCH (n)
-        DETACH DELETE n
+        MATCH (n) DETACH DELETE n
     "#);
 
     match graph.execute(delete_query).await {
@@ -470,5 +508,170 @@ pub async fn reset_database(graph: &Graph) -> Result<bool, String> {
             error!("{}", error_msg);
             return Err(error_msg);
         }
+    }
+}
+
+
+
+
+//Tests
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, thread::sleep};
+
+    use super::*;
+    use neo4rs::{query, Graph};
+    use serde_json::json;
+    use crate::db;
+
+    use tokio::time::{Duration};
+
+    async fn get_graph() -> Arc<neo4rs::Graph> {
+        let db_handler = db::get_database().await.unwrap();
+        db_handler.get_primary_db().await
+    }
+
+    #[tokio::test]
+    async fn test_empty_data() {
+        let graph = get_graph().await;
+        let data = json!({ "data": [] });
+        
+        let result = create_new_relation(&data, &graph).await;
+        
+        assert!(matches!(result, Ok(false)), "Should return Ok(false) for empty array");
+    }
+
+    #[tokio::test]
+    async fn test_invalid_data() {
+        let graph = get_graph().await;
+        let data = json!({
+            "data": [{
+                "color": "red",
+                "sensor_data": { "temperature": 25.5, "humidity": 30.0 },
+                "timestamp": "2023-10-01T00:00:00Z",
+                "energy_consume": 100.0,
+                "energy_cost": 50.0
+                // Missing uuid field
+            }]
+        });
+        // false
+        let result = create_new_relation(&data, &graph).await;
+        assert!(result.is_err(), "Should return Err for invalid data");
+    }
+
+    #[tokio::test]
+    async fn test_valid_data() {
+        let graph = get_graph().await;
+        let test_uuid = "test-uuid-validate";
+        
+       
+        let data = json!({
+            "data": [{
+                "uuid": test_uuid,
+                "color": "test-color",
+                "sensor_data": {
+                    "temperature": 25555.5,
+                    "humidity": 3000.0  
+                },
+                "timestamp": "2100-10-01T00:00:00Z",
+                "energy_consume": 10000.0,
+                "energy_cost": 50000.0
+            }]
+        });
+        // true
+        let result = create_new_relation(&data, &graph).await;
+        assert!(matches!(result, Ok(true)), "Should return Ok(true) for valid data");
+
+        cleanup_test_data(&graph, test_uuid).await;
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_uuid() {
+        let graph = get_graph().await;
+        let test_uuid = "test-uuid-duplicate";
+        
+        
+        let data = json!({
+            "data": [{
+                "uuid": test_uuid,
+                "color": "test-color",
+                "sensor_data": {
+                    "temperature": 25555.5,
+                    "humidity": 3000.0 
+                },
+                "timestamp": "2023-10-01T00:00:00Z",
+                "energy_consume": 10000.0,
+                "energy_cost": 50000.0
+            }]
+        });
+        // true
+        let first_result = create_new_relation(&data, &graph).await;
+        assert!(matches!(first_result, Ok(true)), "First insertion should return Ok(true)");
+        
+        // false
+        let second_result = create_new_relation(&data, &graph).await;
+        assert!(matches!(second_result, Ok(false)), "Second insertion should return Ok(false)");
+
+        cleanup_test_data(&graph, test_uuid).await;
+    }
+
+    #[tokio::test]
+    async fn test_serialization_error() {
+        let graph = get_graph().await;
+        
+       
+        let data = json!({
+            "data": [{
+                "uuid": "test-uuid",
+                "color": "test-color",
+               
+                "sensor_data": {
+                    "temperature": f64::NAN,  
+                    "humidity": 30.0
+                },
+                "timestamp": "2023-10-01T00:00:00Z",
+                "energy_consume": 100.0,
+                "energy_cost": 50.0
+            }]
+        });
+        // error
+        let result = create_new_relation(&data, &graph).await;
+        assert!(result.is_err(), "Should return Err for serialization error");
+    }
+
+
+    async fn cleanup_test_data(graph: &Graph, uuid: &str) {
+        let q = query("MATCH (u:UUID {id: $uuid}) DETACH DELETE u")
+            .param("uuid", uuid);
+        let _ = graph.run(q).await;
+ 
+        let q = query("MATCH (c:Color {value: $value}) DETACH DELETE c")
+            .param("value", "test-color");
+        let _ = graph.run(q).await;
+
+        let q = query("MATCH (t:Temperature {value: $value}) DETACH DELETE t")
+            .param("value", 25555.5);
+        let _ = graph.run(q).await;
+    
+        let q = query("MATCH (h:Humidity {value: $value}) DETACH DELETE h")
+            .param("value", 3000.0);
+        let _ = graph.run(q).await;
+    
+        let q = query("MATCH (ts:Timestamp {value: $value}) DETACH DELETE ts")
+            .param("value", "2023-10-01T00:00:00Z");
+        let _ = graph.run(q).await;
+        
+        let q = query("MATCH (ts:Timestamp {value: $value}) DETACH DELETE ts")
+            .param("value", "2100-10-01T00:00:00Z");
+        let _ = graph.run(q).await;
+    
+        let q = query("MATCH (ec:EnergyCost {value: $value}) DETACH DELETE ec")
+            .param("value", 50000.0);
+        let _ = graph.run(q).await;
+    
+        let q = query("MATCH (eco:EnergyConsume {value: $value}) DETACH DELETE eco")
+            .param("value", 10000.0);
+        let _ = graph.run(q).await;
     }
 }

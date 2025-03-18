@@ -69,7 +69,7 @@ class TcpClient:
             print("Connection closed.")
 
 
-def load_json_from_file(filename="large_data.json"):
+def load_json_from_file(filename="test.json"):
     """Load JSON data from a file in the same directory as the script."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(script_dir, filename)

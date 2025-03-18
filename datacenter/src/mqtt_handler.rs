@@ -5,8 +5,9 @@ use serde_json::{Value, json};
 use std::env;
 use std::error::Error;
 use uuid::Uuid;
-use crate::query::{get_newest_uuid,get_specific_uuid_node,get_all_uuid_nodes,get_nodes_with_color,get_nodes_in_time_range,get_nodes_with_temperature_or_humidity,get_temperature_humidity_at_time,get_nodes_with_energy_cost,get_nodes_with_energy_consume};
+use crate::query::{create_new_relation,get_newest_uuid,get_specific_uuid_node,get_all_uuid_nodes,get_nodes_with_color,get_nodes_in_time_range,get_nodes_with_temperature_or_humidity,get_temperature_humidity_at_time,get_nodes_with_energy_cost,get_nodes_with_energy_consume};
 use crate::db;
+
 
 
 use tokio::time; 
@@ -15,7 +16,7 @@ use chrono;
 use std::sync::Arc;
 
 // Broker can only 10200
-const MAX_MESSAGE_SIZE: usize = 5000;
+const MAX_MESSAGE_SIZE: usize = 8000;
 
 async fn publish_paginated_results(client: &AsyncClient, topic: &str, payload: &Value) -> Result<(), Box<dyn Error>> {
     let payload_str = serde_json::to_string(payload)?;
@@ -174,12 +175,13 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db_handler: &Arc<
         Some(id) => id,
         None => {
             error!("Missing client_id in request");
+           
             return Err("Missing client_id".into());
         }
     };
-    let read_conn_1 = db_handler.get_read_db(0);
-    let read_conn_2 = db_handler.get_read_db(1);
-    let write_conn = db_handler.get_primary_db();
+    let read_conn_1 = db_handler.get_read_db(0).await;
+    let read_conn_2 = db_handler.get_read_db(1).await;
+    let write_conn = db_handler.get_primary_db().await;
     // Request-Typ 
     match json_value.get("request").and_then(Value::as_str) {
         
@@ -201,14 +203,16 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db_handler: &Arc<
                                 Some(node) => {
                                     info!("Found node for UUID {}: {:?}", uuid, node);
                                     publish_result(client, &response_topic, &node).await?;
+                                   
                                 },
                                 None => {
-                                    info!("No node found for UUID: {}", uuid);
+                                    error!("No node found for UUID: {}", uuid);
                                     let empty_response = json!({
                                         "uuid": uuid,
                                         "found": false,
                                         "message": "No data found for this UUID"
                                     });
+                                    
                                     publish_result(client, &response_topic, &empty_response).await?;
                                 }
                             }
@@ -404,13 +408,57 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db_handler: &Arc<
                         let response_topic = format!("rust/response/{}/newest", requesting_client_id);
                         let response = json!({
                             "status": "error",
-                            "message": format!("Failed to get nodes with energy consumption")
+                            "message": format!("Failed to get new nodes ")
                         });
                         publish_result(client, &response_topic, &response).await?;
                     }
                 }
           
         },
+        // you can add data here
+        Some("add") => {
+            info!("Processing 'add' data for Client-ID: {}", requesting_client_id);
+        
+            if let Some(add_data) = json_value.get("data") {
+                match create_new_relation(add_data, &write_conn).await {
+                    Ok(true) => {
+                        let response_topic = format!("rust/response/{}/add", requesting_client_id);
+                        let response = json!({
+                            "status": "success",
+                            "message": "Nodes successfully added"
+                        });
+                        publish_result(client, &response_topic, &response).await?;
+                    }
+                    Ok(false) => {
+                        warn!("No new nodes created (UUIDs might already exist) for Client-ID: {}", requesting_client_id);
+                        let response_topic = format!("rust/response/{}/add", requesting_client_id);
+                        let response = json!({
+                            "status": "warning",
+                            "message": "No new nodes were created (UUIDs might already exist)"
+                        });
+                        publish_result(client, &response_topic, &response).await?;
+                    }
+                    Err(err) => {
+                        error!("Failed to add nodes: {} for Client-ID: {}. Error: {}", add_data, requesting_client_id, err);
+                        let response_topic = format!("rust/response/{}/add", requesting_client_id);
+                        let response = json!({
+                            "status": "error",
+                            "message": format!("Failed to add nodes: {}", err)
+                        });
+                        publish_result(client, &response_topic, &response).await?;
+                    }
+                }
+            } else {
+                error!("Missing or invalid 'data' field for type 'add'. Input: {}", payload_str);
+                let response_topic = format!("rust/response/{}/add", requesting_client_id);
+                let response = json!({
+                    "status": "error",
+                    "message": "Missing or invalid 'data' field"
+                });
+                publish_result(client, &response_topic, &response).await?;
+            }
+        },
+        
         Some("topic") => {
             
             info!("Topic request not implemented yet");

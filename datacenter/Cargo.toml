@@ -16,3 +16,4 @@ env_logger = "0.11.5"
 rumqttc = { version = "0.24", features = ["websocket", "use-rustls"] }
 chrono = "0.4"
 futures = "0.3.31"
+fern = "0.7.1"

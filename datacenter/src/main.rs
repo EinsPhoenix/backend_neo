@@ -5,17 +5,37 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::io;
 use serde_json::Value;
-use std::sync::Arc; 
+use std::sync::Arc;
+use fern::Dispatch;
+use chrono::Local;
 
 mod db;
 mod auth;
-mod json_handler;
+mod ip_payload_handler;
 mod query;
 mod mqtt_handler;
 mod command_handler;
 
+//log init
+fn setup_logger() -> Result<(), fern::InitError> {
+    Dispatch::new()
+        .format(|out, message, record| {
+            let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            out.finish(format_args!(
+                "[{}] [{}] {}",
+                timestamp, record.level(), message
+            ));
+        })
+        .level(log::LevelFilter::Info)  
+        .chain(std::io::stdout())       
+        .chain(fern::log_file("error.log")?)  
+        .apply()?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    setup_logger().expect("Logger konnte nicht initialisiert werden!");
     dotenv().ok();
     
     if env_logger::try_init().is_err() {
@@ -68,7 +88,7 @@ async fn handle_client(
     loop {
         match receive_json(&mut socket).await {
             Ok(Some(json)) => {
-                json_handler::process_json(&json, Arc::clone(&db_handler)).await;
+                ip_payload_handler::process_json(&json, Arc::clone(&db_handler)).await;
             },
             Ok(None) => {
                 info!("Client disconnected.");
