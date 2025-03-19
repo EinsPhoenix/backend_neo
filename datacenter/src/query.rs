@@ -277,9 +277,10 @@ pub async fn export_all_with_relationships(graph: &Graph, limit: Option<usize>) 
     
     let query_str = format!(r#"
         MATCH p=()-[]->() 
+        {}  
         WITH collect(p) AS paths
-        RETURN apoc.convert.toJson(paths) AS json_result
-        {};
+        RETURN apoc.convert.toJson(paths) AS json_result;
+        
     "#, limit_clause);
     
     let query = query(&query_str);
@@ -691,7 +692,7 @@ mod tests {
     async fn test_export_all_with_relationships() {
         let graph = get_graph().await;
         
-        let result = export_all_with_relationships(&graph, Some(200000)).await;
+        let result = export_all_with_relationships(&graph, Some(10000)).await;
         
     
         assert!(result.is_some(), "Exportfunktion sollte Some(Value) zurückgeben");
