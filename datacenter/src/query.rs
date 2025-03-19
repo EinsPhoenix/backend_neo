@@ -3,6 +3,7 @@ use log::{error, info, warn};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+
 //validate function
 
 async fn validate_data(data: &Value) -> bool {
@@ -257,6 +258,51 @@ pub async fn get_all_uuid_nodes(graph: &Graph) -> Option<Value> {
             info!("Returned nodes count: {}", uuids.len());
 
             Some(json!(uuids))
+        },
+        Err(e) => {
+            error!("Failed to execute Neo4j query: {}", e);
+            None
+        }
+    }
+}
+
+
+
+pub async fn export_all_with_relationships(graph: &Graph, limit: Option<usize>) -> Option<Value> {
+    
+    let limit_clause = match limit {
+        Some(l) => format!("LIMIT {}", l),
+        None => "".to_string()
+    };
+    
+    let query_str = format!(r#"
+        MATCH p=()-[]->() 
+        WITH collect(p) AS paths
+        RETURN apoc.convert.toJson(paths) AS json_result
+        {};
+    "#, limit_clause);
+    
+    let query = query(&query_str);
+    
+    match graph.execute(query).await {
+        Ok(mut result) => {
+            if let Ok(Some(row)) = result.next().await {
+                if let Ok(json_str) = row.get::<String>("json_result") {
+                    match serde_json::from_str(&json_str) {
+                        Ok(value) => Some(value),
+                        Err(e) => {
+                            error!("Failed to parse JSON string: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    error!("Failed to get JSON result from row");
+                    None
+                }
+            } else {
+                
+                Some(serde_json::Value::Array(Vec::new()))
+            }
         },
         Err(e) => {
             error!("Failed to execute Neo4j query: {}", e);
@@ -524,6 +570,7 @@ mod tests {
     use neo4rs::{query, Graph};
     use serde_json::json;
     use crate::db;
+    use std::fs;
 
     use tokio::time::{Duration};
 
@@ -552,7 +599,7 @@ mod tests {
                 "timestamp": "2023-10-01T00:00:00Z",
                 "energy_consume": 100.0,
                 "energy_cost": 50.0
-                // Missing uuid field
+                
             }]
         });
         // false
@@ -639,6 +686,28 @@ mod tests {
         let result = create_new_relation(&data, &graph).await;
         assert!(result.is_err(), "Should return Err for serialization error");
     }
+
+    #[tokio::test]
+    async fn test_export_all_with_relationships() {
+        let graph = get_graph().await;
+        
+        let result = export_all_with_relationships(&graph, Some(200000)).await;
+        
+    
+        assert!(result.is_some(), "Exportfunktion sollte Some(Value) zurückgeben");
+
+        let json_result = result.unwrap();
+        
+    
+        let output = json_result.to_string();
+        fs::write("export_all_data.json", &output).expect("Fehler beim Schreiben der JSON-Datei");
+        assert!(!output.is_empty(), "Exportierte Datei sollte nicht leer sein");
+
+        
+    }
+
+
+
 
 
     async fn cleanup_test_data(graph: &Graph, uuid: &str) {
