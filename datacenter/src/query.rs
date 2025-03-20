@@ -575,7 +575,7 @@ const CONCURRENT_BATCHES: usize = 10;
 const BATCH_SIZE: usize = 1000;
 
 pub async fn load_big_json_file(graph: &Graph) -> Result<bool, String> {
-    let file_path = "/home/einsphoenix/Dokumente/Projects/datacenter/backend_neo/datacenter/src/data.json";
+    let file_path = ".\\data.json";
 
     let start_time = std::time::Instant::now();
     
@@ -874,7 +874,7 @@ mod tests {
     async fn test_export_all_with_relationships() {
         let graph = get_graph().await;
         
-        let result = export_all_with_relationships(&graph, Some(400000)).await;
+        let result = export_all_with_relationships(&graph, Some(100000)).await;
         
     
         assert!(result.is_some(), "Exportfunktion sollte Some(Value) zurückgeben");

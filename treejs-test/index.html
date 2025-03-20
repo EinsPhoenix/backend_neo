@@ -1,1095 +1,127 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neo4j 3D Graph Visualization</title>
+    <title>3D Netzwerk Visualisierung</title>
     <style>
         body { 
             margin: 0; 
             overflow: hidden; 
             background-color: #000;
-            font-family: Arial, sans-serif;
-            color: #fff;
-        }
-        canvas { 
-            display: block; 
         }
         #info {
             position: absolute;
             top: 10px;
             left: 10px;
-            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            font-family: Arial, sans-serif;
+            background-color: rgba(0, 0, 0, 0.7);
             padding: 10px;
             border-radius: 5px;
-            font-size: 12px;
-            max-width: 300px;
-            z-index: 100;
-            color: #fff;
-            border: 1px solid #333;
-        }
-        #legend {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 12px;
-            z-index: 100;
-            color: #fff;
-            border: 1px solid #333;
-        }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            margin-bottom: 5px;
-        }
-        .legend-color {
-            width: 15px;
-            height: 15px;
-            border-radius: 50%;
-            margin-right: 8px;
-            border: 1px solid #555;
+            display: none;
+            min-width: 250px;
+            min-height: 100px;
+            pointer-events: auto;
         }
         #loading {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #instructions {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #dropZone {
+            border: 2px dashed #ccc;
+            border-radius: 20px;
+            width: 480px;
+            height: 200px;
+            margin: 100px auto;
+            padding: 20px;
+            text-align: center;
+            color: white;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+        #fileInput {
+            display: none;
+        }
+        .btn {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 15px;
+            font-size: 16px;
+        }
+        .btn:hover {
+            background-color: #45a049;
+        }
+        #speedPopup {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
-            padding: 20px;
-            border-radius: 5px;
-            font-size: 16px;
-            z-index: 1000;
-            color: #fff;
-            border: 1px solid #333;
-        }
-        #controls {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 12px;
-            z-index: 100;
-            color: #fff;
-            border: 1px solid #333;
-        }
-        button {
-            margin: 5px;
-            padding: 5px 10px;
-            cursor: pointer;
-            background: #222;
-            color: #fff;
-            border: 1px solid #444;
-            border-radius: 3px;
-        }
-        button:hover {
-            background: #333;
-        }
-        input[type="file"] {
-            margin: 10px 0;
-            color: #fff;
-        }
-        #controlsInfo {
-            color: #aaa;
-            font-size: 11px;
-            margin-top: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 10px;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none;
         }
     </style>
 </head>
 <body>
-    <div id="loading">Loading graph data...</div>
-    <div id="info">
-        <h3>Neo4j Graph Visualization</h3>
-        <p>Hover over nodes to see details</p>
-        <p>Nodes: <span id="nodeCount">0</span></p>
-        <p>Edges: <span id="edgeCount">0</span></p>
-        <p>Visible Nodes: <span id="visibleNodeCount">0</span></p>
-        <p>Visible Edges: <span id="visibleEdgeCount">0</span></p>
-        <div id="nodeInfo"></div>
+    <div id="info"></div>
+    <div id="loading">Bereit zum Laden...</div>
+    <div id="speedPopup">Speed: 1.00</div>
+    <div id="instructions">
+        Steuerung: <br>
+        - Rechtsklick halten und Maus bewegen zum Umschauen<br>
+        - WASD zum Bewegen<br>
+        - SHIFT für schnelleres Bewegen
     </div>
-    <div id="legend"></div>
-    <div id="controls">
-        <button id="toggleLabels">Toggle Labels</button>
-        <button id="resetCamera">Reset Camera</button>
-        <div>
-            <label for="fileInput">Upload Neo4j JSON data:</label>
-            <input type="file" id="fileInput" accept=".json">
-        </div>
-        <div id="controlsInfo">
-            Controls: WASD to move, QE to go up/down<br>
-            Mouse drag to look around
-        </div>
+    <div id="dropZone">
+        <h2>JSON-Datei hier ablegen oder auswählen</h2>
+        <input type="file" id="fileInput" accept=".json">
+        <button class="btn" id="selectFileBtn">Datei auswählen</button>
     </div>
 
+    <!-- Drei.js und weitere Bibliotheken -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    
-    <script>
-        // Main configuration
-        const config = {
-            maxNodes: 10000,
-            maxEdgesToShow: 40000,
-            showLabels: false,
-            minNodeSize: 3,
-            maxNodeSize: 20,
-            defaultColor: '#95a5a6',
-            colorMap: {
-                'UUID': '#3498db',
-                'Color': '#2ecc71',
-                'Temperature': '#e74c3c',
-                'Humidity': '#1abc9c',
-                'Timestamp': '#f1c40f',
-                'EnergyCost': '#9b59b6',
-                'EnergyConsume': '#e67e22',
-                'Unknown': '#95a5a6'
-            },
-            distribution: {
-                width: 50000,  // Width of distribution area
-                height: 50000, // Height of distribution area
-                depth: 50000,  // Depth of distribution area
-                minDistance: 30 // Minimum distance between nodes
-            },
-            glowIntensity: 10,
-            movementSpeed: 500, 
-            lookSensitivity: 0.003
-        };
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
 
-        // Scene setup
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x050505); // Dark background
-        
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 10, 10000);
-        camera.position.z = 300;
-
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-
-        // Add lights
-        const ambientLight = new THREE.AmbientLight(0x111111, 0.2); // Very dim ambient light
-        scene.add(ambientLight);
-
-        // Variables to store graph data
-        let nodes = {};
-        let edges = [];
-        let nodeObjects = {};
-        let edgeObjects = [];
-        let labelObjects = [];
-        let graphGroup = new THREE.Group();
-        scene.add(graphGroup);
-
-        // For raycasting/interaction
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
-        let intersectedObject = null;
-
-        // Camera movement
-        const movement = {
-            forward: false,
-            backward: false,
-            left: false,
-            right: false,
-            up: false,
-            down: false
-        };
-        
-        let mouseDragging = false;
-        let mouseX = 0, mouseY = 0;
-        let targetRotationX = 0, targetRotationY = 0;
-        
-        // Frustum for culling
-        const frustum = new THREE.Frustum();
-
-        // Parse Neo4j data
-        function parseNeo4jData(data) {
-            const startTime = performance.now();
-            console.log("Parsing Neo4j data...");
-            
-            let parsedData;
-            
-            if (typeof data === 'string') {
-                try {
-                    data = data.trim();
-                    if (data.startsWith("[") && data.endsWith("]")) {
-                        parsedData = JSON.parse(data);
-                    } else {
-                        // Handle more complex string formats
-                        let jsonArrays = [];
-                        let bracketCount = 0;
-                        let startIndex = 0;
-                        
-                        for (let i = 0; i < data.length; i++) {
-                            if (data[i] === '[') {
-                                bracketCount++;
-                                if (bracketCount === 1) {
-                                    startIndex = i;
-                                }
-                            } else if (data[i] === ']') {
-                                bracketCount--;
-                                if (bracketCount === 0) {
-                                    jsonArrays.push(data.substring(startIndex, i + 1));
-                                }
-                            }
-                        }
-                        
-                        parsedData = [];
-                        for (let jsonArray of jsonArrays) {
-                            try {
-                                parsedData.push(JSON.parse(jsonArray));
-                            } catch (e) {
-                                console.warn("Failed to parse JSON array:", e);
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.error("Error parsing JSON data:", e);
-                    return [];
-                }
-            } else if (Array.isArray(data)) {
-                parsedData = data;
-            } else {
-                console.error("Data is not in a recognizable format");
-                return [];
-            }
-            
-            const endTime = performance.now();
-            console.log(`Parsing completed in ${((endTime - startTime) / 1000).toFixed(2)}s`);
-            return parsedData;
-        }
-
-        // Build graph from parsed data
-        function createNetworkGraph(parsedData) {
-            const startTime = performance.now();
-            console.log("Building graph...");
-            
-            nodes = {};
-            edges = [];
-            let nodeCount = 0;
-            let relationshipCount = 0;
-            
-            // First pass: collect nodes and count relationships
-            for (const relationshipSet of parsedData) {
-                for (const item of relationshipSet) {
-                    if (item.type === "node") {
-                        const nodeId = item.id;
-                        if (!nodes[nodeId] && nodeCount < config.maxNodes) {
-                            const label = item.labels && item.labels.length > 0 ? item.labels[0] : "Unknown";
-                            const properties = {};
-                            
-                            if (item.properties) {
-                                if (item.properties.id) properties.id = item.properties.id;
-                                if (item.properties.value) properties.value = item.properties.value;
-                                if (item.properties.name) properties.name = item.properties.name;
-                            }
-                            
-                            nodes[nodeId] = {
-                                label: label,
-                                properties: properties,
-                                relationships: 0,
-                                position: null,
-                                visible: true
-                            };
-                            nodeCount++;
-                        }
-                    } else if (item.type === "relationship") {
-                        const startNode = item.start && item.start.id;
-                        const endNode = item.end && item.end.id;
-                        
-                        if (startNode && endNode && nodes[startNode] && nodes[endNode]) {
-                            nodes[startNode].relationships++;
-                            nodes[endNode].relationships++;
-                            relationshipCount++;
-                        }
-                    }
-                }
-            }
-            
-            // Second pass: collect edges
-            relationshipCount = 0;
-            for (const relationshipSet of parsedData) {
-                for (const item of relationshipSet) {
-                    if (item.type === "relationship" && relationshipCount < config.maxEdgesToShow) {
-                        const startNode = item.start && item.start.id;
-                        const endNode = item.end && item.end.id;
-                        
-                        if (startNode && endNode && nodes[startNode] && nodes[endNode]) {
-                            const relLabel = item.label || "RELATED_TO";
-                            edges.push({
-                                source: startNode,
-                                target: endNode,
-                                label: relLabel,
-                                visible: true
-                            });
-                            relationshipCount++;
-                        }
-                    }
-                }
-            }
-            
-            // Calculate positions with non-overlapping nodes
-            calculateNonOverlappingPositions();
-            
-            const endTime = performance.now();
-            console.log(`Graph created with ${Object.keys(nodes).length} nodes and ${edges.length} edges in ${((endTime - startTime) / 1000).toFixed(2)}s`);
-            
-            // Update UI
-            document.getElementById('nodeCount').textContent = Object.keys(nodes).length;
-            document.getElementById('edgeCount').textContent = edges.length;
-            
-            return { nodes, edges };
-        }
-
-        // Calculate 3D positions for nodes ensuring no overlap
-        function calculateNonOverlappingPositions() {
-            const nodeCount = Object.keys(nodes).length;
-            console.log(`Calculating layout for ${nodeCount} nodes with non-overlapping positions...`);
-            
-            if (nodeCount === 0) return;
-            
-            const { width, height, depth, minDistance } = config.distribution;
-            const halfWidth = width / 2;
-            const halfHeight = height / 2;
-            const halfDepth = depth / 2;
-            
-            // First, assign random positions to all nodes
-            const positions = [];
-            
-            for (const nodeId in nodes) {
-                const x = Math.random() * width - halfWidth;
-                const y = Math.random() * height - halfHeight;
-                const z = Math.random() * depth - halfDepth;
-                
-                const position = new THREE.Vector3(x, y, z);
-                nodes[nodeId].position = position;
-                positions.push({ nodeId, position });
-            }
-            
-            // Simple collision resolution (not the most efficient but functional)
-            // We'll do multiple passes to improve distribution
-            const iterations = 10;
-            for (let iter = 0; iter < iterations; iter++) {
-                let moved = false;
-                
-                for (let i = 0; i < positions.length; i++) {
-                    const pos1 = positions[i].position;
-                    
-                    for (let j = i + 1; j < positions.length; j++) {
-                        const pos2 = positions[j].position;
-                        const distance = pos1.distanceTo(pos2);
-                        
-                        if (distance < minDistance) {
-                            // Move nodes away from each other
-                            const direction = new THREE.Vector3()
-                                .subVectors(pos1, pos2)
-                                .normalize()
-                                .multiplyScalar((minDistance - distance) * 0.5);
-                            
-                            pos1.add(direction);
-                            pos2.sub(direction);
-                            
-                            // Ensure nodes remain within bounds
-                            pos1.x = Math.max(-halfWidth, Math.min(halfWidth, pos1.x));
-                            pos1.y = Math.max(-halfHeight, Math.min(halfHeight, pos1.y));
-                            pos1.z = Math.max(-halfDepth, Math.min(halfDepth, pos1.z));
-                            
-                            pos2.x = Math.max(-halfWidth, Math.min(halfWidth, pos2.x));
-                            pos2.y = Math.max(-halfHeight, Math.min(halfHeight, pos2.y));
-                            pos2.z = Math.max(-halfDepth, Math.min(halfDepth, pos2.z));
-                            
-                            moved = true;
-                        }
-                    }
-                }
-                
-                if (!moved) break; // Early exit if no nodes needed to be moved
-            }
-            
-            // Update node positions
-            for (const { nodeId, position } of positions) {
-                nodes[nodeId].position = position;
-            }
-        }
-
-        // Create 3D visualization
-        function visualizeGraph() {
-            const startTime = performance.now();
-            console.log("Creating 3D visualization...");
-            
-            // Clear previous visualization
-            while (graphGroup.children.length > 0) {
-                const obj = graphGroup.children[0];
-                graphGroup.remove(obj);
-                if (obj.geometry) obj.geometry.dispose();
-                if (obj.material) {
-                    if (Array.isArray(obj.material)) {
-                        obj.material.forEach(mat => mat.dispose());
-                    } else {
-                        obj.material.dispose();
-                    }
-                }
-            }
-            
-            nodeObjects = {};
-            edgeObjects = [];
-            labelObjects = [];
-            
-            // Create nodes
-            createNodes();
-            
-            // Create edges
-            createEdges();
-            
-            // Add labels if enabled
-            if (config.showLabels) {
-                createLabels();
-            }
-            
-            // Create legend
-            createLegend();
-            
-            const endTime = performance.now();
-            console.log(`Visualization created in ${((endTime - startTime) / 1000).toFixed(2)}s`);
-        }
-
-        // Create glowing node spheres
-        function createNodes() {
-            const nodeCount = Object.keys(nodes).length;
-            if (nodeCount === 0) return;
-            
-            // Calculate min and max relationship counts
-            let minRelationships = Infinity;
-            let maxRelationships = 0;
-            
-            for (const nodeId in nodes) {
-                const relCount = nodes[nodeId].relationships;
-                minRelationships = Math.min(minRelationships, relCount);
-                maxRelationships = Math.max(maxRelationships, relCount);
-            }
-            
-            // Create node geometries and materials
-            for (const nodeId in nodes) {
-                const node = nodes[nodeId];
-                const relCount = node.relationships;
-                
-                // Scale node size based on relationship count
-                let size;
-                if (maxRelationships > minRelationships) {
-                    const logScale = Math.log1p(relCount) / Math.log1p(maxRelationships);
-                    size = config.minNodeSize + (config.maxNodeSize - config.minNodeSize) * logScale;
-                } else {
-                    size = config.minNodeSize;
-                }
-                
-                // Create sphere geometry
-                const geometry = new THREE.SphereGeometry(size, 16, 16);
-                
-                // Set color based on node label
-                const color = new THREE.Color(config.colorMap[node.label] || config.defaultColor);
-                
-                // Create glowing material
-                const material = new THREE.MeshBasicMaterial({
-                    color: color,
-                    transparent: true,
-                    opacity: 0.9
-                });
-                
-                // Create mesh and position it
-                const sphere = new THREE.Mesh(geometry, material);
-                sphere.position.copy(node.position);
-                
-                // Store original color for hover effects
-                sphere.userData = {
-                    nodeId: nodeId,
-                    originalColor: color.getHex(),
-                    label: node.label,
-                    properties: node.properties,
-                    relationships: node.relationships
-                };
-                
-                // Add glow effect
-                const glowSize = size * 1.5;
-                const glowGeometry = new THREE.SphereGeometry(glowSize, 16, 16);
-                const glowMaterial = new THREE.MeshBasicMaterial({
-                    color: color,
-                    transparent: true,
-                    opacity: config.glowIntensity,
-                    side: THREE.BackSide
-                });
-                const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-                sphere.add(glowMesh);
-                
-                graphGroup.add(sphere);
-                nodeObjects[nodeId] = sphere;
-            }
-        }
-
-        // Create edge lines
-        function createEdges() {
-            const edgeCount = edges.length;
-            if (edgeCount === 0) return;
-            
-            const maxRelationships = Math.max(...Object.values(nodes).map(n => n.relationships));
-            
-            for (let i = 0; i < edgeCount && i < config.maxEdgesToShow; i++) {
-                const edge = edges[i];
-                const sourceNode = nodes[edge.source];
-                const targetNode = nodes[edge.target];
-                
-                if (!sourceNode || !targetNode) continue;
-                
-                const sourcePos = sourceNode.position;
-                const targetPos = targetNode.position;
-                
-                // Calculate edge importance
-                const importance = (sourceNode.relationships + targetNode.relationships) / (2 * maxRelationships);
-                const alpha = 0.1 + 0.3 * importance;
-                
-                // Create line geometry
-                const geometry = new THREE.BufferGeometry();
-                const points = [sourcePos, targetPos];
-                geometry.setFromPoints(points);
-                
-                // Create line material
-                const material = new THREE.LineBasicMaterial({
-                    color: 0xffffff,
-                    transparent: true,
-                    opacity: alpha
-                });
-                
-                // Create line
-                const line = new THREE.Line(geometry, material);
-                line.userData = {
-                    source: edge.source,
-                    target: edge.target,
-                    label: edge.label,
-                    sourcePos: sourcePos,
-                    targetPos: targetPos
-                };
-                
-                graphGroup.add(line);
-                edgeObjects.push(line);
-            }
-        }
-
-        // Create text labels for important nodes
-        function createLabels() {
-            const nodeCount = Object.keys(nodes).length;
-            if (nodeCount === 0) return;
-            
-            const maxRelationships = Math.max(...Object.values(nodes).map(n => n.relationships));
-            
-            // Create labels for important nodes
-            for (const nodeId in nodes) {
-                const node = nodes[nodeId];
-                const relCount = node.relationships;
-                
-                // Only create labels for significant nodes
-                if (relCount > maxRelationships * 0.1 || nodeCount <= 100) {
-                    let labelText = "";
-                    
-                    if (node.properties.value) {
-                        labelText = `${node.label}: ${node.properties.value}`;
-                    } else if (node.properties.name) {
-                        labelText = node.properties.name;
-                    } else if (node.properties.id) {
-                        labelText = node.properties.id;
-                    } else {
-                        labelText = node.label;
-                    }
-                    
-                    // Create label element
-                    const div = document.createElement('div');
-                    div.className = 'nodeLabel';
-                    div.textContent = labelText;
-                    div.style.position = 'absolute';
-                    div.style.color = '#fff';
-                    div.style.padding = '2px';
-                    div.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-                    div.style.borderRadius = '2px';
-                    div.style.fontSize = '10px';
-                    div.style.pointerEvents = 'none';
-                    div.style.zIndex = '1000';
-                    div.style.border = '1px solid #333';
-                    
-                    document.body.appendChild(div);
-                    labelObjects.push({
-                        element: div,
-                        nodeId: nodeId,
-                        position: node.position.clone()
-                    });
-                }
-            }
-        }
-
-        // Update label positions
-        function updateLabels() {
-            labelObjects.forEach(label => {
-                const node = nodes[label.nodeId];
-                if (!node || !node.visible) {
-                    label.element.style.display = 'none';
-                    return;
-                }
-                
-                const position = label.position.clone();
-                position.project(camera);
-                
-                const x = (position.x + 1) * window.innerWidth / 2;
-                const y = (-position.y + 1) * window.innerHeight / 2;
-                
-                label.element.style.left = x + 'px';
-                label.element.style.top = y + 'px';
-                
-                // Hide labels that are behind the camera
-                if (position.z > 1) {
-                    label.element.style.display = 'none';
-                } else {
-                    label.element.style.display = 'block';
-                }
-            });
-        }
-
-        // Create color legend
-        function createLegend() {
-            const legendDiv = document.getElementById('legend');
-            legendDiv.innerHTML = '<h3>Node Types</h3>';
-            
-            // Get unique node labels
-            const uniqueLabels = [...new Set(Object.values(nodes).map(n => n.label))];
-            
-            // Create legend items for each label
-            uniqueLabels.forEach(label => {
-                const color = config.colorMap[label] || config.defaultColor;
-                
-                const item = document.createElement('div');
-                item.className = 'legend-item';
-                
-                const colorBox = document.createElement('div');
-                colorBox.className = 'legend-color';
-                colorBox.style.backgroundColor = color;
-                
-                const text = document.createElement('span');
-                text.textContent = label;
-                
-                item.appendChild(colorBox);
-                item.appendChild(text);
-                legendDiv.appendChild(item);
-            });
-        }
-
-        // Frustum culling to show only visible nodes and edges
-        function updateVisibility() {
-            // Update frustum from camera
-            camera.updateMatrixWorld();
-            frustum.setFromProjectionMatrix(
-                new THREE.Matrix4().multiplyMatrices(
-                    camera.projectionMatrix,
-                    camera.matrixWorldInverse
-                )
-            );
-            
-            let visibleNodes = 0;
-            let visibleEdges = 0;
-            
-            // Update node visibility
-            for (const nodeId in nodes) {
-                const node = nodes[nodeId];
-                const nodeObj = nodeObjects[nodeId];
-                
-                if (!nodeObj) continue;
-                
-                // Check if node is in frustum
-                const isVisible = frustum.containsPoint(node.position);
-                node.visible = isVisible;
-                
-                // Update node visibility
-                nodeObj.visible = isVisible;
-                
-                if (isVisible) {
-                    visibleNodes++;
-                }
-            }
-            
-            // Update edge visibility
-            for (let i = 0; i < edgeObjects.length; i++) {
-                const edge = edges[i];
-                const edgeObj = edgeObjects[i];
-                
-                if (!edge || !edgeObj) continue;
-                
-                const sourceVisible = nodes[edge.source] && nodes[edge.source].visible;
-                const targetVisible = nodes[edge.target] && nodes[edge.target].visible;
-                
-                // Edge is visible if at least one endpoint is visible
-                const isVisible = sourceVisible || targetVisible;
-                edge.visible = isVisible;
-                edgeObj.visible = isVisible;
-                
-                if (isVisible) {
-                    visibleEdges++;
-                }
-            }
-            
-            // Update counters
-            document.getElementById('visibleNodeCount').textContent = visibleNodes;
-            document.getElementById('visibleEdgeCount').textContent = visibleEdges;
-        }
-
-        // Handle mouse move for raycasting
-        function onMouseMove(event) {
-            // Calculate mouse position in normalized device coordinates
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-            
-            // Store mouse position for camera rotation
-            if (mouseDragging) {
-                const deltaX = event.clientX - mouseX;
-                const deltaY = event.clientY - mouseY;
-                
-                targetRotationY -= deltaX * config.lookSensitivity;
-                targetRotationX -= deltaY * config.lookSensitivity;
-                
-                // Limit vertical rotation to prevent flipping
-                targetRotationX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetRotationX));
-                
-                mouseX = event.clientX;
-                mouseY = event.clientY;
-            }
-        }
-
-        // Handle mouse down
-        function onMouseDown(event) {
-            if (event.button === 2) { // Right button
-                mouseDragging = true;
-                mouseX = event.clientX;
-                mouseY = event.clientY;
-            }
-        }
-
-        // Handle mouse up
-        function onMouseUp(event) {
-            if (event.button === 2) { // Right button
-                mouseDragging = false;
-            }
-        }
-
-        // Prevent context menu on right-click
-        function onContextMenu(event) {
-            event.preventDefault();
-        }
-
-        // Handle key down
-        function onKeyDown(event) {
-            switch (event.code) {
-                case 'KeyW':
-                    movement.forward = true;
-                    break;
-                case 'KeyS':
-                    movement.backward = true;
-                    break;
-                case 'KeyA':
-                    movement.left = true;
-                    break;
-                case 'KeyD':
-                    movement.right = true;
-                    break;
-                case 'KeyQ':
-                    movement.up = true;
-                    break;
-                case 'KeyE':
-                    movement.down = true;
-                    break;
-            }
-        }
-
-        // Handle key up
-        function onKeyUp(event) {
-            switch (event.code) {
-                case 'KeyW':
-                    movement.forward = false;
-                    break;
-                case 'KeyS':
-                    movement.backward = false;
-                    break;
-                case 'KeyA':
-                    movement.left = false;
-                    break;
-                case 'KeyD':
-                    movement.right = false;
-                    break;
-                case 'KeyQ':
-                    movement.up = false;
-                    break;
-                case 'KeyE':
-                    movement.down = false;
-                    break;
-            }
-        }
-
-        // Handle window resize
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        // Update camera position based on keyboard input
-        function updateCamera(deltaTime) {
-            // Get camera's local directions
-            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-            const up = new THREE.Vector3(0, 1, 0);
-            
-            // Normalize movement vectors
-            forward.normalize();
-            right.normalize();
-            
-            // Calculate movement distance based on speed and time
-            const moveDistance = config.movementSpeed * deltaTime;
-            
-            // Apply movements
-            if (movement.forward) camera.position.addScaledVector(forward, moveDistance);
-            if (movement.backward) camera.position.addScaledVector(forward, -moveDistance);
-            if (movement.right) camera.position.addScaledVector(right, moveDistance);
-            if (movement.left) camera.position.addScaledVector(right, -moveDistance);
-            if (movement.up) camera.position.addScaledVector(up, moveDistance);
-            if (movement.down) camera.position.addScaledVector(up, -moveDistance);
-            
-            // Update camera rotation based on mouse movement
-            camera.rotation.x = targetRotationX;
-            camera.rotation.y = targetRotationY;
-        }
-
-        // Check for intersections with nodes
-       // Check for intersections with nodes
-    function checkIntersections() {
-        raycaster.setFromCamera(mouse, camera);
-        
-        // Get all visible node objects
-        const nodeObjectsArray = Object.values(nodeObjects).filter(obj => obj.visible);
-        
-        // Find intersections
-        const intersects = raycaster.intersectObjects(nodeObjectsArray);
-        
-        // Reset previously intersected object
-        if (intersectedObject && (!intersects.length || intersects[0].object !== intersectedObject)) {
-            // Restore original color
-            intersectedObject.material.color.setHex(intersectedObject.userData.originalColor);
-            
-            // Reset glow
-            if (intersectedObject.children.length > 0) {
-                intersectedObject.children[0].material.color.setHex(intersectedObject.userData.originalColor);
-                intersectedObject.children[0].material.opacity = config.glowIntensity;
-            }
-            
-            // Clear info
-            document.getElementById('nodeInfo').innerHTML = '';
-            
-            intersectedObject = null;
-        }
-        
-        // Handle new intersection
-        if (intersects.length > 0 && intersects[0].object !== intersectedObject) {
-            intersectedObject = intersects[0].object;
-            
-            // Highlight node
-            intersectedObject.material.color.setHex(0xffffff);
-            
-            // Enhance glow
-            if (intersectedObject.children.length > 0) {
-                intersectedObject.children[0].material.color.setHex(0xffffff);
-                intersectedObject.children[0].material.opacity = config.glowIntensity * 1.5;
-            }
-            
-            // Display node info
-            const nodeData = intersectedObject.userData;
-            let infoHTML = `<h4>${nodeData.label} Node</h4>`;
-            
-            for (const prop in nodeData.properties) {
-                infoHTML += `<p><strong>${prop}:</strong> ${nodeData.properties[prop]}</p>`;
-            }
-            
-            infoHTML += `<p><strong>Connections:</strong> ${nodeData.relationships}</p>`;
-            
-            document.getElementById('nodeInfo').innerHTML = infoHTML;
-        }
-    }
-
-    // Animation loop
-    let lastTime = 0;
-    function animate(time) {
-        const deltaTime = (time - lastTime) / 1000; // Convert to seconds
-        lastTime = time;
-        
-        requestAnimationFrame(animate);
-        
-        // Update camera position
-        updateCamera(deltaTime);
-        
-        // Update visibility
-        updateVisibility();
-        
-        // Check for intersections
-        checkIntersections();
-        
-        // Update label positions if visible
-        if (config.showLabels) {
-            updateLabels();
-        }
-        
-        // Render scene
-        renderer.render(scene, camera);
-    }
-
-    // Toggle label visibility
-    function toggleLabels() {
-        config.showLabels = !config.showLabels;
-        
-        if (config.showLabels) {
-            // Create labels if they don't exist
-            if (labelObjects.length === 0) {
-                createLabels();
-            } else {
-                // Show existing labels
-                labelObjects.forEach(label => {
-                    label.element.style.display = 'block';
-                });
-            }
-        } else {
-            // Hide labels
-            labelObjects.forEach(label => {
-                label.element.style.display = 'none';
-            });
-        }
-    }
-
-    // Reset camera to initial position
-    function resetCamera() {
-        camera.position.set(0, 0, 300);
-        targetRotationX = 0;
-        targetRotationY = 0;
-        camera.rotation.x = 0;
-        camera.rotation.y = 0;
-        camera.rotation.z = 0;
-    }
-
-    // Load Neo4j data from file
-    function handleFileSelect(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        
-        document.getElementById('loading').style.display = 'block';
-        
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                const data = e.target.result;
-                const parsedData = parseNeo4jData(data);
-                createNetworkGraph(parsedData);
-                visualizeGraph();
-                document.getElementById('loading').style.display = 'none';
-            } catch (error) {
-                console.error("Error processing file:", error);
-                document.getElementById('loading').style.display = 'none';
-                alert("Error processing file. Please check that it contains valid Neo4j JSON data.");
-            }
-        };
-        
-        reader.readAsText(file);
-    }
-
-    // Sample data for testing
-    function loadSampleData() {
-        document.getElementById('loading').style.display = 'block';
-        
-        // Generate sample graph data
-        const sampleData = generateSampleData();
-        
-        createNetworkGraph(sampleData);
-        visualizeGraph();
-        
-        document.getElementById('loading').style.display = 'none';
-    }
-
-    // Generate sample data
-    function generateSampleData() {
-        const nodeCount = 100;
-        const edgeCount = 150;
-        
-        const data = [[]];
-        const nodeIds = [];
-        
-        // Generate nodes
-        for (let i = 0; i < nodeCount; i++) {
-            const nodeId = `n${i}`;
-            nodeIds.push(nodeId);
-            
-            const nodeType = ['UUID', 'Color', 'Temperature', 'Humidity', 'Timestamp', 'EnergyCost', 'EnergyConsume'][Math.floor(Math.random() * 7)];
-            
-            data[0].push({
-                type: "node",
-                id: nodeId,
-                labels: [nodeType],
-                properties: {
-                    id: nodeId,
-                    value: Math.random() < 0.5 ? 
-                        (Math.random() * 100).toFixed(1) : 
-                        `value_${Math.floor(Math.random() * 100)}`
-                }
-            });
-        }
-        
-        // Generate relationships
-        for (let i = 0; i < edgeCount; i++) {
-            const sourceIndex = Math.floor(Math.random() * nodeIds.length);
-            let targetIndex;
-            
-            do {
-                targetIndex = Math.floor(Math.random() * nodeIds.length);
-            } while (targetIndex === sourceIndex);
-            
-            const relationshipTypes = ['CONNECTED_TO', 'DEPENDS_ON', 'BELONGS_TO', 'PART_OF', 'REFERENCES'];
-            const relType = relationshipTypes[Math.floor(Math.random() * relationshipTypes.length)];
-            
-            data[0].push({
-                type: "relationship",
-                id: `r${i}`,
-                label: relType,
-                start: { id: nodeIds[sourceIndex] },
-                end: { id: nodeIds[targetIndex] }
-            });
-        }
-        
-        return data;
-    }
-
-    // Initialize application
-    function init() {
-        // Event listeners
-        document.addEventListener('mousemove', onMouseMove, false);
-        document.addEventListener('mousedown', onMouseDown, false);
-        document.addEventListener('mouseup', onMouseUp, false);
-        document.addEventListener('contextmenu', onContextMenu, false);
-        document.addEventListener('keydown', onKeyDown, false);
-        document.addEventListener('keyup', onKeyUp, false);
-        window.addEventListener('resize', onWindowResize, false);
-        
-        // Initialize UI controls
-        document.getElementById('toggleLabels').addEventListener('click', toggleLabels);
-        document.getElementById('resetCamera').addEventListener('click', resetCamera);
-        document.getElementById('fileInput').addEventListener('change', handleFileSelect, false);
-        
-        // Load sample data
-        loadSampleData();
-        
-        // Start animation loop
-        animate(0);
-    }
-
-    // Initialize on page load
-    window.onload = init;
-</script>
+    <!-- Camera Controller und Main Script -->
+    <script src="camercontroller.js"></script>
+    <script src="mainlogic.js"></script>
 </body>
 </html>
