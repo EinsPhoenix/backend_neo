@@ -1,6 +1,6 @@
-use neo4rs::{Graph, query};
+use neo4rs::{Graph, query, Query};
 use log::{error, info, warn};
-use serde_json::{json, Value};
+use serde_json::{json, Value, Deserializer};
 use std::collections::HashMap;
 
 
@@ -556,6 +556,188 @@ pub async fn reset_database(graph: &Graph) -> Result<bool, String> {
             return Err(error_msg);
         }
     }
+}
+
+
+
+/// Läd eine große JSON-Datei asynchron und verarbeitet jedes JSON-Objekt separat.
+
+use std::fs::File;
+
+use std::sync::Arc;
+use memmap2::Mmap;
+use rayon::prelude::*;
+use serde::Deserialize;
+use tokio::sync::Semaphore;
+
+
+const CONCURRENT_BATCHES: usize = 10;
+const BATCH_SIZE: usize = 1000;
+
+pub async fn load_big_json_file(graph: &Graph) -> Result<bool, String> {
+    let file_path = "/home/einsphoenix/Dokumente/Projects/datacenter/backend_neo/datacenter/src/data.json";
+
+    let start_time = std::time::Instant::now();
+    
+   
+    let file = File::open(file_path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+    
+    let mmap = unsafe { Mmap::map(&file) }
+        .map_err(|e| format!("Memory mapping failed: {}", e))?;
+
+    let root = parse_json_with_streaming(&mmap)?;
+
+ 
+    process_data_in_parallel(Arc::new(graph.clone()), &root).await?;
+
+    info!("Gesamtverarbeitungszeit: {:.2?}", start_time.elapsed());
+    Ok(true)
+}
+
+fn parse_json_with_streaming(mmap: &Mmap) -> Result<Value, String> {
+   
+    let mut deserializer = Deserializer::from_slice(&mmap);
+   
+    Value::deserialize(&mut deserializer)
+        .map_err(|e| format!("JSON Deserialization error: {}", e))
+}
+
+
+async fn process_data_in_parallel(graph: Arc<Graph>, data: &Value) -> Result<(), String> {
+    let data_array = data.get("data")
+        .and_then(|d| d.as_array())
+        .ok_or("Missing or invalid data array")?;
+
+ 
+    let neo4j_data: Vec<HashMap<String, Value>> = data_array
+        .par_iter()
+        .map(|item| {
+            let mut record = HashMap::new();
+            
+          
+            extract_field(&mut record, item, "uuid");
+            extract_field(&mut record, item, "color");
+            extract_field(&mut record, item, "timestamp");
+            extract_float_field(&mut record, item, "energy_consume");
+            extract_float_field(&mut record, item, "energy_cost");
+            process_sensor_data(&mut record, item);
+            
+            record
+        })
+        .collect();
+
+  
+    let semaphore = Arc::new(Semaphore::new(CONCURRENT_BATCHES));
+    let mut tasks = vec![];
+
+    for chunk in neo4j_data.chunks(BATCH_SIZE) {
+        let graph = graph.clone();
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let batch = chunk.to_vec();
+
+        tasks.push(tokio::spawn(async move {
+            let result = process_batch(&graph, &batch).await;
+            drop(permit);
+            result
+        }));
+    }
+
+   
+    let results = futures::future::join_all(tasks).await;
+    for res in results {
+        match res {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => error!("Batch Fehler: {}", e),
+            Err(e) => error!("Task Fehler: {}", e),
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_field(record: &mut HashMap<String, Value>, item: &Value, field: &str) {
+    if let Some(val) = item.get(field).and_then(|v| v.as_str()) {
+        record.insert(field.to_string(), Value::String(val.to_string()));
+    }
+}
+
+fn extract_float_field(record: &mut HashMap<String, Value>, item: &Value, field: &str) {
+    if let Some(val) = item.get(field).and_then(|v| v.as_f64()) {
+        if let Some(num) = serde_json::Number::from_f64(val) {
+            record.insert(field.to_string(), Value::Number(num));
+        }
+    }
+}
+
+fn process_sensor_data(record: &mut HashMap<String, Value>, item: &Value) {
+    if let Some(sensor_data) = item.get("sensor_data").and_then(|v| v.as_object()) {
+        if let Some(temp) = sensor_data.get("temperature").and_then(|v| v.as_f64()) {
+            if let Some(num) = serde_json::Number::from_f64(temp) {
+                record.insert("sensor_data.temperature".to_string(), Value::Number(num));
+            }
+        }
+        if let Some(humidity) = sensor_data.get("humidity").and_then(|v| v.as_f64()) {
+            if let Some(num) = serde_json::Number::from_f64(humidity) {
+                record.insert("sensor_data.humidity".to_string(), Value::Number(num));
+            }
+        }
+    }
+}
+
+async fn process_batch(graph: &Graph, batch: &[HashMap<String, Value>]) -> Result<(), String> {
+    let json_data = serde_json::to_string(batch)
+        .map_err(|e| format!("Serialisierungsfehler: {}", e))?;
+
+    let query = create_optimized_query(&json_data);
+    
+    let mut result = graph.execute(query)
+        .await
+        .map_err(|e| format!("Neo4j Fehler: {}", e))?;
+
+    let mut processed = 0;
+    while let Ok(Some(_)) = result.next().await {
+        processed += 1;
+    }
+
+    if processed > 0 {
+        info!("Batch verarbeitet: {} Einträge", processed);
+    }
+    Ok(())
+}
+
+fn create_optimized_query(data: &str) -> Query {
+    query(
+        r#"
+        UNWIND apoc.convert.fromJsonList($data) AS record
+        MERGE (uuid:UUID {id: record.uuid})
+        ON CREATE SET
+            uuid.energy_consume = record.energy_consume,
+            uuid.energy_cost = record.energy_cost
+        
+        MERGE (color:Color {value: record.color})
+        MERGE (uuid)-[:HAS_COLOR]->(color)
+        
+        FOREACH (_ IN CASE WHEN record.`sensor_data.temperature` IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (t:Temperature {value: record.`sensor_data.temperature`})
+            MERGE (uuid)-[:HAS_TEMPERATURE]->(t)
+        )
+        
+        FOREACH (_ IN CASE WHEN record.`sensor_data.humidity` IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (h:Humidity {value: record.`sensor_data.humidity`})
+            MERGE (uuid)-[:HAS_HUMIDITY]->(h)
+        )
+        
+        MERGE (ts:Timestamp {value: record.timestamp})
+        MERGE (uuid)-[:HAS_TIMESTAMP]->(ts)
+        
+        WITH ts, record
+        WHERE record.energy_cost IS NOT NULL
+        MERGE (ec:EnergyCost {value: record.energy_cost})
+        MERGE (ts)-[:HAS_PRICE]->(ec)
+        "#
+    )
+    .param("data", data)
 }
 
 

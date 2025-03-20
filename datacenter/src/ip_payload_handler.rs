@@ -7,7 +7,7 @@ use crate::query::create_new_relation;
 use crate::command_handler::router;
 
 pub async fn process_json(json: &Value, db_handler: Arc<db::DatabaseCluster> ) {
-    // info!("Processing JSON: {}", json);
+    info!("Processing JSON: {}", json);
  
     
  

@@ -17,3 +17,8 @@ rumqttc = { version = "0.24", features = ["websocket", "use-rustls"] }
 chrono = "0.4"
 futures = "0.3.31"
 fern = "0.7.1"
+tokio-util = { version = "0.7", features = ["codec"] }
+json-stream = "0.1.1"
+regex = "1.11.0"
+rayon = "1.9"
+memmap2 = "0.9"
