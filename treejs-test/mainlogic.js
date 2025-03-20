@@ -42,93 +42,93 @@ let nextColorIndex = 0;
 let composer, bloomPass;
 
 
-const SPACE_SIZE = 50000;
+let SPACE_SIZE = 50000;
 
 
 const MIN_DISTANCE = 100;
 
+let octree;
+
 
 function init() {
-   
     infoPanel = document.getElementById('info');
     loadingIndicator = document.getElementById('loading');
     fileInput = document.getElementById('fileInput');
     dropZone = document.getElementById('dropZone');
-    
-    
+
     document.getElementById('selectFileBtn').addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', handleFileSelect);
-    
-   
+
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         dropZone.style.borderColor = '#4CAF50';
     });
-    
+
     dropZone.addEventListener('dragleave', () => {
         dropZone.style.borderColor = '#ccc';
     });
-    
+
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.style.borderColor = '#ccc';
-        
+
         if (e.dataTransfer.files.length) {
             handleFile(e.dataTransfer.files[0]);
         }
     });
 
-    // Three.js Setup - create these FIRST
+    // Szene mit Nebel
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
-    
-    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 100000);
+    scene.fog = new THREE.Fog(0x000000, 5000, 75000); 
+
+    // Kamera mit optimierter Sichtweite
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
     camera.position.set(0, 0, 1000);
     camera.lookAt(0, 0, 0);
-    
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+
+    // Renderer mit Performance-Optimierung
+    renderer = new THREE.WebGLRenderer({
+        antialias: false,  
+        powerPreference: "high-performance",
+        logarithmicDepthBuffer: false, 
+        precision: "mediump" 
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); 
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
-    
-   
+
     renderer.domElement.addEventListener('click', handleClick);
     
     raycaster = new THREE.Raycaster();
-    
- 
+
     cameraController = new CameraController(camera, renderer.domElement);
-    
-   
+
     window.addEventListener('resize', onWindowResize);
-    
-  
+
+    // Beleuchtung
     const groundLight = addGroundLightCircle();
     scene.add(groundLight);
-    
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     ambientLight.position.set(0, 25000, 0);
     scene.add(ambientLight);
-    
- 
-    const pointLight = new THREE.PointLight(0xffffff, 1);
+
+    const pointLight = new THREE.PointLight(0xffffff, 0.8);
     pointLight.position.set(0, 25000, 0);
     scene.add(pointLight);
-    
 
     try {
         setupBloomEffect();
     } catch (error) {
         console.error("Konnte Bloom-Effekt nicht initialisieren:", error);
-     
     }
-    
- 
+
     setupGUI();
-    
-    
+
     animate();
 }
+
 
 
 function setupGUI() {
@@ -162,6 +162,9 @@ case 'Qualität':
   
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    renderer.antialias = true;
+    renderer.setPixelRatio(window.devicePixelRatio);
     
     
     scene.children.forEach(child => {
@@ -199,6 +202,9 @@ case 'Standard':
    
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    renderer.antialias = false;
+    renderer.setPixelRatio(window.devicePixelRatio);
     
     
     scene.children.forEach(child => {
@@ -233,6 +239,8 @@ case 'Performance':
     }
 
     renderer.shadowMap.enabled = false;
+    renderer.antialias = false;
+    renderer.setPixelRatio(1);
     
     
     scene.children.forEach(child => {
@@ -259,6 +267,14 @@ case 'Performance':
     loadingIndicator.textContent = 'Performance-Modus: Alle Effekte und Animationen deaktiviert für maximale Geschwindigkeit';
     break;
 }
+}
+
+
+
+// Nach createVisualization():
+function initOctree() {
+  octree = new THREE.Octree();
+  octree.fromGraphNode(scene);
 }
 
 function handleClick(event) {
@@ -557,6 +573,8 @@ function processDataWithWorker(jsonData) {
         
         nodes = new Map(processedData.nodes);
         relationships = processedData.relationships;
+
+        SPACE_SIZE = calculateSpaceSize(nodes.size)
         
       
         createVisualization();
@@ -576,6 +594,27 @@ function processDataWithWorker(jsonData) {
    
     worker.postMessage(jsonData);
 }
+
+function calculateSpaceSize(nodeCount) {
+   
+    const DEFAULT_SPACE_SIZE = 50000;
+  
+    if (nodeCount > 30000) {
+    
+      const HIGH_THRESHOLD = 20000; 
+      if (nodeCount > HIGH_THRESHOLD) {
+        return 400000;
+      } else {
+        return 200000;
+      }
+    } else if (nodeCount > 10000) {
+      return 100000;
+    } else if (nodeCount > 5000) {
+      return 75000;
+    } else {
+      return DEFAULT_SPACE_SIZE;
+    }
+  }
 
 function createVisualization() {
   
@@ -1102,6 +1141,18 @@ return circle;
 
 
 function animate() {
+    renderer.state.reset();
+    renderer.autoClear = true;
+    if (octree) {
+        const frustum = new THREE.Frustum();
+        frustum.setFromProjectionMatrix(
+          new THREE.Matrix4().multiplyMatrices(
+            camera.projectionMatrix,
+            camera.matrixWorldInverse
+          )
+        );
+        octree.getVisibleNodes(frustum, true);
+      }
 requestAnimationFrame(animate);
 
 const delta = 0.01; 
