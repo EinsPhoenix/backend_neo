@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 import json
-import scipy  # Explicit import to ensure it's available
+import scipy 
 from itertools import islice
 import sys
 import matplotlib.cm as cm

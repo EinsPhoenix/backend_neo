@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neo4j 3D Graph Visualization</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #f8f9fa;
+            font-family: Arial, sans-serif;
+        }
+        canvas { 
+            display: block; 
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            max-width: 300px;
+            z-index: 100;
+        }
+        #legend {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 100;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            margin-right: 8px;
+            border: 1px solid #333;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 5px;
+            font-size: 16px;
+            z-index: 1000;
+        }
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 100;
+        }
+        button {
+            margin: 5px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">Loading graph data...</div>
+    <div id="info">
+        <h3>Neo4j Graph Visualization</h3>
+        <p>Hover over nodes to see details</p>
+        <p>Nodes: <span id="nodeCount">0</span></p>
+        <p>Edges: <span id="edgeCount">0</span></p>
+        <p>Node size based on connection count</p>
+        <div id="nodeInfo"></div>
+    </div>
+    <div id="legend"></div>
+    <div id="controls">
+        <button id="toggleLabels">Toggle Labels</button>
+        <button id="toggleRotation">Pause Rotation</button>
+        <button id="resetCamera">Reset Camera</button>
+        <div>
+            <label for="fileInput">Upload Neo4j JSON data:</label>
+            <input type="file" id="fileInput" accept=".json">
+        </div>
+    </div>
+
+    <!-- Updated CDN links with integrity and crossorigin attributes -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.min.js"></script>
+    
+    <!-- Inline Stats.js implementation to avoid dependency issues -->
+    <script>
+        // Simple Stats implementation
+        class SimpleStats {
+            constructor() {
+                this.dom = document.createElement('div');
+                this.dom.style.position = 'absolute';
+                this.dom.style.top = '10px';
+                this.dom.style.left = 'calc(50% - 40px)';
+                this.dom.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                this.dom.style.color = 'white';
+                this.dom.style.padding = '5px';
+                this.dom.style.borderRadius = '3px';
+                this.dom.style.fontSize = '12px';
+                this.dom.textContent = 'FPS: 0';
+                
+                this.lastTime = performance.now();
+                this.frames = 0;
+                this.fps = 0;
+            }
+            
+            begin() {
+                this.frames++;
+                const time = performance.now();
+                
+                if (time >= this.lastTime + 1000) {
+                    this.fps = Math.round((this.frames * 1000) / (time - this.lastTime));
+                    this.dom.textContent = `FPS: ${this.fps}`;
+                    this.lastTime = time;
+                    this.frames = 0;
+                }
+            }
+            
+            end() {
+                // No operation needed for this simple implementation
+            }
+            
+            showPanel(id) {
+                // No operation needed for this simple implementation
+            }
+        }
+        
+        // Create a global Stats object
+        const Stats = SimpleStats;
+    </script>
+
+    <script>
+        // Main configuration
+        const config = {
+            maxNodes: 10000,
+            maxEdgesToShow: 20000,
+            showLabels: false,
+            autoRotate: true,
+            minNodeSize: 1,
+            maxNodeSize: 15,
+            defaultColor: '#95a5a6',
+            defaultFile: null,  // Changed from './test.json' to null to use sample data
+            colorMap: {
+                'UUID': '#3498db',
+                'Color': '#2ecc71',
+                'Temperature': '#e74c3c',
+                'Humidity': '#1abc9c',
+                'Timestamp': '#f1c40f',
+                'EnergyCost': '#9b59b6',
+                'EnergyConsume': '#e67e22',
+                'Unknown': '#95a5a6'
+            }
+        };
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf8f9fa);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+        camera.position.z = 300;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Add lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+
+        // Performance monitoring
+        const stats = new Stats();
+        stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+        document.body.appendChild(stats.dom);
+
+        // Variables to store graph data
+        let nodes = {};
+        let edges = [];
+        let nodeObjects = {};
+        let edgeObjects = [];
+        let labelObjects = [];
+        let graphGroup = new THREE.Group();
+        scene.add(graphGroup);
+
+        // For raycasting/interaction
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let intersectedObject = null;
+
+        // Create graph container with axes
+        function createAxes(size) {
+            const axesHelper = new THREE.AxesHelper(size);
+            graphGroup.add(axesHelper);
+        }
+
+        // Parse Neo4j data
+        function parseNeo4jData(data) {
+            const startTime = performance.now();
+            console.log("Parsing Neo4j data...");
+            
+            let parsedData;
+            
+            if (typeof data === 'string') {
+                try {
+                    data = data.trim();
+                    if (data.startsWith("[") && data.endsWith("]")) {
+                        parsedData = JSON.parse(data);
+                    } else {
+                        // Handle more complex string formats similar to the Python function
+                        let jsonArrays = [];
+                        let bracketCount = 0;
+                        let startIndex = 0;
+                        
+                        for (let i = 0; i < data.length; i++) {
+                            if (data[i] === '[') {
+                                bracketCount++;
+                                if (bracketCount === 1) {
+                                    startIndex = i;
+                                }
+                            } else if (data[i] === ']') {
+                                bracketCount--;
+                                if (bracketCount === 0) {
+                                    jsonArrays.push(data.substring(startIndex, i + 1));
+                                }
+                            }
+                        }
+                        
+                        parsedData = [];
+                        for (let jsonArray of jsonArrays) {
+                            try {
+                                parsedData.push(JSON.parse(jsonArray));
+                            } catch (e) {
+                                console.warn("Failed to parse JSON array:", e);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error parsing JSON data:", e);
+                    return [];
+                }
+            } else if (Array.isArray(data)) {
+                parsedData = data;
+            } else {
+                console.error("Data is not in a recognizable format");
+                return [];
+            }
+            
+            const endTime = performance.now();
+            console.log(`Parsing completed in ${((endTime - startTime) / 1000).toFixed(2)}s`);
+            return parsedData;
+        }
+
+        // Build graph from parsed data
+        function createNetworkGraph(parsedData) {
+            const startTime = performance.now();
+            console.log("Building graph...");
+            
+            nodes = {};
+            edges = [];
+            let nodeCount = 0;
+            let relationshipCount = 0;
+            
+            // First pass: collect nodes and count relationships
+            for (const relationshipSet of parsedData) {
+                for (const item of relationshipSet) {
+                    if (item.type === "node") {
+                        const nodeId = item.id;
+                        if (!nodes[nodeId] && nodeCount < config.maxNodes) {
+                            const label = item.labels && item.labels.length > 0 ? item.labels[0] : "Unknown";
+                            const properties = {};
+                            
+                            if (item.properties) {
+                                if (item.properties.id) properties.id = item.properties.id;
+                                if (item.properties.value) properties.value = item.properties.value;
+                                if (item.properties.name) properties.name = item.properties.name;
+                            }
+                            
+                            nodes[nodeId] = {
+                                label: label,
+                                properties: properties,
+                                relationships: 0,
+                                position: null
+                            };
+                            nodeCount++;
+                        }
+                    } else if (item.type === "relationship") {
+                        const startNode = item.start && item.start.id;
+                        const endNode = item.end && item.end.id;
+                        
+                        if (startNode && endNode && nodes[startNode] && nodes[endNode]) {
+                            nodes[startNode].relationships++;
+                            nodes[endNode].relationships++;
+                            relationshipCount++;
+                        }
+                    }
+                }
+            }
+            
+            // Second pass: collect edges
+            relationshipCount = 0;
+            for (const relationshipSet of parsedData) {
+                for (const item of relationshipSet) {
+                    if (item.type === "relationship" && relationshipCount < config.maxEdgesToShow) {
+                        const startNode = item.start && item.start.id;
+                        const endNode = item.end && item.end.id;
+                        
+                        if (startNode && endNode && nodes[startNode] && nodes[endNode]) {
+                            const relLabel = item.label || "RELATED_TO";
+                            edges.push({
+                                source: startNode,
+                                target: endNode,
+                                label: relLabel
+                            });
+                            relationshipCount++;
+                        }
+                    }
+                }
+            }
+            
+            // Calculate positions
+            calculateNodePositions();
+            
+            const endTime = performance.now();
+            console.log(`Graph created with ${Object.keys(nodes).length} nodes and ${edges.length} edges in ${((endTime - startTime) / 1000).toFixed(2)}s`);
+            
+            // Update UI
+            document.getElementById('nodeCount').textContent = Object.keys(nodes).length;
+            document.getElementById('edgeCount').textContent = edges.length;
+            
+            return { nodes, edges };
+        }
+
+        // Calculate 3D positions for nodes
+        function calculateNodePositions() {
+            const nodeCount = Object.keys(nodes).length;
+            console.log(`Calculating layout for ${nodeCount} nodes...`);
+            
+            if (nodeCount === 0) return;
+            
+            // For simplicity, we'll use random positions
+            // In a full implementation, you could add spring layout or force-directed algorithms
+            for (const nodeId in nodes) {
+                const radius = 200; // sphere radius
+                
+                // Random position on a sphere
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const x = radius * Math.sin(phi) * Math.cos(theta);
+                const y = radius * Math.sin(phi) * Math.sin(theta);
+                const z = radius * Math.cos(phi);
+                
+                nodes[nodeId].position = new THREE.Vector3(x, y, z);
+            }
+        }
+
+        // Create 3D visualization
+        function visualizeGraph() {
+            const startTime = performance.now();
+            console.log("Creating 3D visualization...");
+            
+            // Clear previous visualization
+            while (graphGroup.children.length > 0) {
+                const obj = graphGroup.children[0];
+                graphGroup.remove(obj);
+                if (obj.geometry) obj.geometry.dispose();
+                if (obj.material) {
+                    if (Array.isArray(obj.material)) {
+                        obj.material.forEach(mat => mat.dispose());
+                    } else {
+                        obj.material.dispose();
+                    }
+                }
+            }
+            
+            nodeObjects = {};
+            edgeObjects = [];
+            labelObjects = [];
+            
+            // Create nodes
+            createNodes();
+            
+            // Create edges
+            createEdges();
+            
+            // Add labels if enabled
+            if (config.showLabels) {
+                createLabels();
+            }
+            
+            // Create legend
+            createLegend();
+            
+            const endTime = performance.now();
+            console.log(`Visualization created in ${((endTime - startTime) / 1000).toFixed(2)}s`);
+        }
+
+        // Create node spheres
+        function createNodes() {
+            const nodeCount = Object.keys(nodes).length;
+            if (nodeCount === 0) return;
+            
+            // Calculate min and max relationship counts
+            let minRelationships = Infinity;
+            let maxRelationships = 0;
+            
+            for (const nodeId in nodes) {
+                const relCount = nodes[nodeId].relationships;
+                minRelationships = Math.min(minRelationships, relCount);
+                maxRelationships = Math.max(maxRelationships, relCount);
+            }
+            
+            // Create node geometries and materials
+            for (const nodeId in nodes) {
+                const node = nodes[nodeId];
+                const relCount = node.relationships;
+                
+                // Scale node size based on relationship count
+                let size;
+                if (maxRelationships > minRelationships) {
+                    const logScale = Math.log1p(relCount) / Math.log1p(maxRelationships);
+                    size = config.minNodeSize + (config.maxNodeSize - config.minNodeSize) * logScale;
+                } else {
+                    size = config.minNodeSize;
+                }
+                
+                // Create sphere geometry
+                const geometry = new THREE.SphereGeometry(size, 16, 16);
+                
+                // Set color based on node label
+                const color = config.colorMap[node.label] || config.defaultColor;
+                const material = new THREE.MeshLambertMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                
+                // Create mesh and position it
+                const sphere = new THREE.Mesh(geometry, material);
+                sphere.position.copy(node.position);
+                
+                // Store original color for hover effects
+                sphere.userData = {
+                    nodeId: nodeId,
+                    originalColor: color,
+                    label: node.label,
+                    properties: node.properties,
+                    relationships: node.relationships
+                };
+                
+                graphGroup.add(sphere);
+                nodeObjects[nodeId] = sphere;
+            }
+        }
+
+        // Create edge lines
+        function createEdges() {
+            const edgeCount = edges.length;
+            if (edgeCount === 0) return;
+            
+            const maxRelationships = Math.max(...Object.values(nodes).map(n => n.relationships));
+            
+            for (let i = 0; i < edgeCount && i < config.maxEdgesToShow; i++) {
+                const edge = edges[i];
+                const sourceNode = nodes[edge.source];
+                const targetNode = nodes[edge.target];
+                
+                if (!sourceNode || !targetNode) continue;
+                
+                const sourcePos = sourceNode.position;
+                const targetPos = targetNode.position;
+                
+                // Calculate edge importance
+                const importance = (sourceNode.relationships + targetNode.relationships) / (2 * maxRelationships);
+                const alpha = 0.1 + 0.4 * importance;
+                const lineWidth = 1 + importance * 2;
+                
+                // Create line geometry
+                const geometry = new THREE.BufferGeometry();
+                const points = [sourcePos, targetPos];
+                geometry.setFromPoints(points);
+                
+                // Create line material
+                const material = new THREE.LineBasicMaterial({
+                    color: 0x999999,
+                    transparent: true,
+                    opacity: alpha,
+                    linewidth: lineWidth // Note: linewidth only works in Firefox
+                });
+                
+                // Create line
+                const line = new THREE.Line(geometry, material);
+                line.userData = {
+                    source: edge.source,
+                    target: edge.target,
+                    label: edge.label
+                };
+                
+                graphGroup.add(line);
+                edgeObjects.push(line);
+            }
+        }
+
+        // Create text labels for important nodes
+        function createLabels() {
+            const nodeCount = Object.keys(nodes).length;
+            if (nodeCount === 0) return;
+            
+            const maxRelationships = Math.max(...Object.values(nodes).map(n => n.relationships));
+            
+            // Create labels for important nodes
+            for (const nodeId in nodes) {
+                const node = nodes[nodeId];
+                const relCount = node.relationships;
+                
+                // Only create labels for significant nodes
+                if (relCount > maxRelationships * 0.1 || nodeCount <= 100) {
+                    let labelText = "";
+                    
+                    if (node.properties.value) {
+                        labelText = `${node.label}: ${node.properties.value}`;
+                    } else if (node.properties.name) {
+                        labelText = node.properties.name;
+                    } else if (node.properties.id) {
+                        labelText = node.properties.id;
+                    } else {
+                        labelText = node.label;
+                    }
+                    
+                    // Create label element
+                    const div = document.createElement('div');
+                    div.className = 'nodeLabel';
+                    div.textContent = labelText;
+                    div.style.position = 'absolute';
+                    div.style.color = '#000';
+                    div.style.padding = '2px';
+                    div.style.backgroundColor = 'rgba(255, 255, 255, 0.7)';
+                    div.style.borderRadius = '2px';
+                    div.style.fontSize = '10px';
+                    div.style.pointerEvents = 'none';
+                    div.style.zIndex = '1000';
+                    
+                    document.body.appendChild(div);
+                    labelObjects.push({
+                        element: div,
+                        nodeId: nodeId,
+                        position: node.position.clone()
+                    });
+                }
+            }
+        }
+
+        // Update label positions
+        function updateLabels() {
+            labelObjects.forEach(label => {
+                const position = label.position.clone();
+                position.project(camera);
+                
+                const x = (position.x + 1) * window.innerWidth / 2;
+                const y = (-position.y + 1) * window.innerHeight / 2;
+                
+                label.element.style.left = x + 'px';
+                label.element.style.top = y + 'px';
+                
+                // Hide labels that are behind the camera
+                if (position.z > 1) {
+                    label.element.style.display = 'none';
+                } else {
+                    label.element.style.display = 'block';
+                }
+            });
+        }
+
+        // Create color legend
+        function createLegend() {
+            const legendDiv = document.getElementById('legend');
+            legendDiv.innerHTML = '<h3>Node Types</h3>';
+            
+            // Get unique node labels
+            const uniqueLabels = [...new Set(Object.values(nodes).map(n => n.label))];
+            
+            // Create legend items for each label
+            uniqueLabels.forEach(label => {
+                const color = config.colorMap[label] || config.defaultColor;
+                
+                const item = document.createElement('div');
+                item.className = 'legend-item';
+                
+                const colorBox = document.createElement('div');
+                colorBox.className = 'legend-color';
+                colorBox.style.backgroundColor = color;
+                
+                const text = document.createElement('span');
+                text.textContent = label;
+                
+                item.appendChild(colorBox);
+                item.appendChild(text);
+                legendDiv.appendChild(item);
+            });
+        }
+
+        // Handle mouse move for raycasting
+        function onMouseMove(event) {
+            // Calculate mouse position in normalized device coordinates
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        // Handle window resize
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Check for intersections with nodes
+        function checkIntersections() {
+            raycaster.setFromCamera(mouse, camera);
+            
+            // Get all node objects
+            const nodeObjectsArray = Object.values(nodeObjects);
+            
+            // Find intersections
+            const intersects = raycaster.intersectObjects(nodeObjectsArray);
+            
+            // Reset previously highlighted object
+            if (intersectedObject) {
+                intersectedObject.material.color.set(intersectedObject.userData.originalColor);
+                intersectedObject.material.opacity = 0.8;
+                intersectedObject = null;
+                document.getElementById('nodeInfo').innerHTML = '';
+            }
+            
+            // Highlight new intersection
+            if (intersects.length > 0) {
+                intersectedObject = intersects[0].object;
+                intersectedObject.material.color.set(0xffff00); // Yellow highlight
+                intersectedObject.material.opacity = 1.0;
+                
+                // Show node info
+                const userData = intersectedObject.userData;
+                let infoHTML = `<strong>Label:</strong> ${userData.label}<br>`;
+                
+                if (userData.properties) {
+                    infoHTML += '<strong>Properties:</strong><br>';
+                    for (const key in userData.properties) {
+                        infoHTML += `${key}: ${userData.properties[key]}<br>`;
+                    }
+                }
+                
+                infoHTML += `<strong>Connections:</strong> ${userData.relationships}`;
+                document.getElementById('nodeInfo').innerHTML = infoHTML;
+            }
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            stats.begin();
+            
+            // Auto-rotate graph
+            if (config.autoRotate) {
+                graphGroup.rotation.y += 0.001;
+                graphGroup.rotation.x += 0.0005;
+            }
+            
+            // Update raycasting
+            checkIntersections();
+            
+            // Update label positions if visible
+            if (config.showLabels && labelObjects.length > 0) {
+                updateLabels();
+            }
+            
+            // Render scene
+            renderer.render(scene, camera);
+            stats.end();
+        }
+
+        // Toggle node labels
+        function toggleLabels() {
+            config.showLabels = !config.showLabels;
+            
+            // Clear existing labels
+            labelObjects.forEach(label => {
+                if (label.element && label.element.parentNode) {
+                    label.element.parentNode.removeChild(label.element);
+                }
+            });
+            labelObjects = [];
+            
+            // Create new labels if enabled
+            if (config.showLabels) {
+                createLabels();
+                document.getElementById('toggleLabels').textContent = 'Hide Labels';
+            } else {
+                document.getElementById('toggleLabels').textContent = 'Show Labels';
+            }
+        }
+
+        // Toggle rotation
+        function toggleRotation() {
+            config.autoRotate = !config.autoRotate;
+            document.getElementById('toggleRotation').textContent = 
+                config.autoRotate ? 'Pause Rotation' : 'Resume Rotation';
+        }
+
+        // Reset camera position
+        function resetCamera() {
+            camera.position.set(0, 0, 300);
+            camera.lookAt(0, 0, 0);
+        }
+
+        // Handle file upload
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            document.getElementById('loading').style.display = 'block';
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = e.target.result;
+                    const parsedData = parseNeo4jData(data);
+                    createNetworkGraph(parsedData);
+                    visualizeGraph();
+                } catch (error) {
+                    console.error("Error processing file:", error);
+                    alert("Error processing file: " + error.message);
+                } finally {
+                    document.getElementById('loading').style.display = 'none';
+                }
+            };
+            
+            reader.onerror = function() {
+                console.error("Error reading file");
+                alert("Error reading file");
+                document.getElementById('loading').style.display = 'none';
+            };
+            
+            reader.readAsText(file);
+        }
+
+        // Load data from a URL
+        function loadJsonFromUrl(url) {
+            document.getElementById('loading').style.display = 'block';
+            
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Network response was not ok: ${response.status}`);
+                    }
+                    return response.text();
+                })
+                .then(data => {
+                    const parsedData = parseNeo4jData(data);
+                    createNetworkGraph(parsedData);
+                    visualizeGraph();
+                    document.getElementById('loading').style.display = 'none';
+                })
+                .catch(error => {
+                    console.error('Error loading JSON from URL:', error);
+                    console.log('Falling back to sample data...');
+                    loadSampleData();
+                });
+        }
+
+        // Sample data for initial visualization
+        function loadSampleData() {
+            document.getElementById('loading').style.display = 'block';
+            
+            // Generate sample nodes
+            const sampleData = [];
+            const nodeTypes = ['UUID', 'Color', 'Temperature', 'Humidity', 'Timestamp'];
+            
+            // Create 100 sample nodes (increased from 50)
+            for (let i = 0; i < 100; i++) {
+                const nodeType = nodeTypes[Math.floor(Math.random() * nodeTypes.length)];
+                const nodeId = `node_${i}`;
+                
+                sampleData.push([{
+                    type: "node",
+                    id: nodeId,
+                    labels: [nodeType],
+                    properties: {
+                        id: nodeId,
+                        value: Math.floor(Math.random() * 100)
+                    }
+                }]);
+            }
+            
+            // Create random relationships (increased from 100)
+            for (let i = 0; i < 200; i++) {
+                const source = `node_${Math.floor(Math.random() * 100)}`;
+                const target = `node_${Math.floor(Math.random() * 100)}`;
+                
+                if (source !== target) {
+                    sampleData.push([{
+                        type: "relationship",
+                        start: { id: source },
+                        end: { id: target },
+                        label: "RELATED_TO"
+                    }]);
+                }
+            }
+            
+            const parsedData = parseNeo4jData(sampleData);
+            createNetworkGraph(parsedData);
+            visualizeGraph();
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        // Setup event listeners
+        document.addEventListener('mousemove', onMouseMove, false);
+        window.addEventListener('resize', onWindowResize, false);
+        
+        document.getElementById('toggleLabels').addEventListener('click', toggleLabels);
+        document.getElementById('toggleRotation').addEventListener('click', toggleRotation);
+        document.getElementById('resetCamera').addEventListener('click', resetCamera);
+        document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+        
+        // Create axes
+        createAxes(300);
+        
+        // Initialization function
+        function init() {
+            console.log("Initializing visualization...");
+            
+            // Load sample data immediately
+            loadSampleData();
+        }
+        
+        // Start initialization
+        init();
+        
+        // Start animation loop
+        animate();
+    </script>
+</body>
+</html>

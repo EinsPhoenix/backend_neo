@@ -244,3 +244,49 @@
 1741698602: New connection from 192.168.50.84:33095 on port 1883.
 1741698602: New client connected from 192.168.50.84:33095 as mqtt_sensor_client_981 (p2, c1, k60, u'admin').
 1741698650: Client mqtt_sensor_client_981 closed its connection.
+1742455210: mosquitto version 2.0.15 starting
+1742455210: Config loaded from /mosquitto/config/mosquitto.conf.
+1742455210: Opening ipv4 listen socket on port 1883.
+1742455210: Opening websockets listen socket on port 9001.
+1742455210: mosquitto version 2.0.15 running
+1742456263: New connection from 172.19.0.1:51158 on port 1883.
+1742456263: New connection from 172.19.0.1:51172 on port 1883.
+1742456263: New client connected from 172.19.0.1:51158 as test-client-2 (p2, c1, k60, u'admin').
+1742456263: New client connected from 172.19.0.1:51172 as test-client-1 (p2, c1, k60, u'admin').
+1742456275: Client test-client-1 closed its connection.
+1742456275: Client test-client-2 closed its connection.
+1742456318: New connection from 172.19.0.1:48394 on port 1883.
+1742456318: New client connected from 172.19.0.1:48394 as rust-mqtt-server-63f54715-093f-4ffe-a435-f73c6acf9adc (p2, c1, k30, u'admin').
+1742456459: New connection from 172.19.0.1:54992 on port 1883.
+1742456459: New connection from 172.19.0.1:54998 on port 1883.
+1742456459: New client connected from 172.19.0.1:54992 as test-client-2 (p2, c1, k60, u'admin').
+1742456459: New client connected from 172.19.0.1:54998 as test-client-1 (p2, c1, k60, u'admin').
+1742456460: Client test-client-2 disconnected.
+1742456460: Client test-client-1 disconnected.
+1742456603: Client rust-mqtt-server-63f54715-093f-4ffe-a435-f73c6acf9adc closed its connection.
+1742456610: New connection from 172.19.0.1:53200 on port 1883.
+1742456610: New client connected from 172.19.0.1:53200 as rust-mqtt-server-ddf9dc0a-c8a8-4057-b9e9-102ee6af3dc8 (p2, c1, k30, u'admin').
+1742456620: New connection from 172.19.0.1:36716 on port 1883.
+1742456620: New connection from 172.19.0.1:36726 on port 1883.
+1742456620: New client connected from 172.19.0.1:36716 as test-client-1 (p2, c1, k60, u'admin').
+1742456620: New client connected from 172.19.0.1:36726 as test-client-2 (p2, c1, k60, u'admin').
+1742456621: Client test-client-2 disconnected.
+1742456621: Client test-client-1 disconnected.
+1742457198: New connection from 172.19.0.1:47904 on port 1883.
+1742457198: New connection from 172.19.0.1:47920 on port 1883.
+1742457198: New connection from 172.19.0.1:47930 on port 1883.
+1742457198: New client connected from 172.19.0.1:47904 as test-client-2 (p2, c1, k60, u'admin').
+1742457198: New client connected from 172.19.0.1:47920 as test-client-3 (p2, c1, k60, u'admin').
+1742457198: New client connected from 172.19.0.1:47930 as test-client-1 (p2, c1, k60, u'admin').
+1742457198: Client test-client-3 disconnected.
+1742457198: Client test-client-2 disconnected.
+1742457198: Client test-client-1 disconnected.
+1742457339: New connection from 172.19.0.1:60610 on port 1883.
+1742457339: New client connected from 172.19.0.1:60610 as test-client-1 (p2, c1, k60, u'admin').
+1742457339: New connection from 172.19.0.1:60618 on port 1883.
+1742457339: New connection from 172.19.0.1:60632 on port 1883.
+1742457339: New client connected from 172.19.0.1:60618 as test-client-3 (p2, c1, k60, u'admin').
+1742457339: New client connected from 172.19.0.1:60632 as test-client-2 (p2, c1, k60, u'admin').
+1742457339: Client test-client-1 disconnected.
+1742457339: Client test-client-2 disconnected.
+1742457339: Client test-client-3 disconnected.

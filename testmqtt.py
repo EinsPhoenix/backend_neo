@@ -298,8 +298,9 @@ def run_test_client(client_name, request_type, params):
             {"request": "energy_consume", "data": consume}, "energy_consume"
         )
     elif request_type == "newest":
-
         return client.send_request({"request": "newest", "data": ""}, "newest")
+    elif request_type == "relation":
+        return client.send_request({"request": "relation", "data": ""}, "relation")
 
 
 def run_multiple_clients(num_clients=2, test_type=None):
@@ -314,6 +315,7 @@ def run_multiple_clients(num_clients=2, test_type=None):
         "energy_cost",
         "energy_consume",
         "newest",
+        "relation",
     ]
 
     if test_type and test_type not in test_types:
@@ -350,6 +352,8 @@ def run_multiple_clients(num_clients=2, test_type=None):
             params["consume"] = 100.0 + (i * 50.0)
         elif selected_test == "newest":
             params["newest"] = ""
+        elif selected_test == "relation":
+            params["relation"] = ""
 
         tasks.append((client_name, selected_test, params))
 
@@ -386,6 +390,7 @@ if __name__ == "__main__":
             "energy_cost",
             "energy_consume",
             "newest",
+            "relation",
         ],
         help="Specific test to run (if not specified, random tests will be chosen)",
     )

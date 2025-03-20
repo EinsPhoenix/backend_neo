@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use std::env;
 use std::error::Error;
 use uuid::Uuid;
-use crate::query::{create_new_relation,get_newest_uuid,get_specific_uuid_node,get_all_uuid_nodes,get_nodes_with_color,get_nodes_in_time_range,get_nodes_with_temperature_or_humidity,get_temperature_humidity_at_time,get_nodes_with_energy_cost,get_nodes_with_energy_consume};
+use crate::query::{export_all_with_relationships,create_new_relation,get_newest_uuid,get_specific_uuid_node,get_all_uuid_nodes,get_nodes_with_color,get_nodes_in_time_range,get_nodes_with_temperature_or_humidity,get_temperature_humidity_at_time,get_nodes_with_energy_cost,get_nodes_with_energy_consume};
 use crate::db;
 
 
@@ -458,6 +458,29 @@ async fn process_request(client: &AsyncClient, payload: &[u8], db_handler: &Arc<
                 publish_result(client, &response_topic, &response).await?;
             }
         },
+
+        Some("relation") => {
+            
+            info!("Processing 'relation' data for Client-ID: {}", requesting_client_id);
+            match export_all_with_relationships(&read_conn_1, Some(1000)).await {
+                Some(nodes) => {
+                    let response_topic = format!("rust/response/{}/relation", requesting_client_id);
+                    publish_result(client, &response_topic, &nodes).await?;
+                },
+                None => {
+                    error!("Failed to get newest nodes for Client-ID: {}", requesting_client_id);
+
+                    let response_topic = format!("rust/response/{}/relation", requesting_client_id);
+                    let response = json!({
+                        "status": "error",
+                        "message": format!("Failed to get new nodes ")
+                    });
+                    publish_result(client, &response_topic, &response).await?;
+                }
+            }
+      
+    },
+        
         
         Some("topic") => {
             

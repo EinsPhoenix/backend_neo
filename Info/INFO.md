@@ -24,3 +24,7 @@ CREATE INDEX FOR (h:Humidity) ON (h.value);
 CREATE INDEX FOR (ts:Timestamp) ON (ts.value);
 CREATE INDEX FOR (ec:EnergyCost) ON (ec.value);
 CREATE INDEX FOR (e:EnergyConsume) ON (e.value);
+
+
+
+python testmqtt.py --clients 3 --test uuid
