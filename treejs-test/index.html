@@ -131,10 +131,10 @@
         // Main configuration
         const config = {
             maxNodes: 10000,
-            maxEdgesToShow: 20000,
+            maxEdgesToShow: 40000,
             showLabels: false,
-            minNodeSize: 1,
-            maxNodeSize: 8,
+            minNodeSize: 3,
+            maxNodeSize: 20,
             defaultColor: '#95a5a6',
             colorMap: {
                 'UUID': '#3498db',
@@ -147,13 +147,13 @@
                 'Unknown': '#95a5a6'
             },
             distribution: {
-                width: 5000,  // Width of distribution area
-                height: 5000, // Height of distribution area
-                depth: 5000,  // Depth of distribution area
+                width: 50000,  // Width of distribution area
+                height: 50000, // Height of distribution area
+                depth: 50000,  // Depth of distribution area
                 minDistance: 30 // Minimum distance between nodes
             },
-            glowIntensity: 0.6,
-            movementSpeed: 200, // Units per second
+            glowIntensity: 10,
+            movementSpeed: 500, 
             lookSensitivity: 0.003
         };
 
