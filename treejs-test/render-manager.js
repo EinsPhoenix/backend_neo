@@ -150,7 +150,6 @@ class RenderManager {
           useLOD: this.useLOD,
           showFPS: true,
           dynamicRendering: true,
-          edgeBundling: true,
           bundlingStrength: 0.5,
           adaptivePerformance: true,
           performanceMode: false,
@@ -183,21 +182,9 @@ class RenderManager {
             }
           });
           
-      renderOptions.add(params, "edgeBundling")
-          .name("Kanten bündeln")
-          .onChange((value) => {
-            if (window.objectManager) {
-              window.objectManager.toggleEdgeBundling(value, params.bundlingStrength);
-            }
-          });
+    
           
-      renderOptions.add(params, "bundlingStrength", 0.1, 1.0)
-          .name("Bündelungsstärke")
-          .onChange((value) => {
-            if (window.objectManager && window.objectManager.edgeBundlingEnabled) {
-              window.objectManager.toggleEdgeBundling(true, value);
-            }
-          });
+     
 
      
       performanceOptions.add(params, "adaptivePerformance")
@@ -229,7 +216,6 @@ class RenderManager {
       
       if (window.objectManager) {
         window.objectManager.setDynamicRendering(params.dynamicRendering);
-        window.objectManager.toggleEdgeBundling(params.edgeBundling, params.bundlingStrength);
       }
       
       window.useAdaptivePerformance = params.adaptivePerformance;
