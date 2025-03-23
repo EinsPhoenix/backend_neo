@@ -909,8 +909,8 @@ class ObjectManager {
         type: 'relationship'
       };
       
-      // Enable frustum culling
-      line.frustumCulled = this.frustumCulled;
+
+      line.frustumCulled = false;
       
       this.scene.add(line);
       this.lineObjects.push(line);
@@ -926,7 +926,10 @@ class ObjectManager {
       midPoint.y += 20;
       
       labelSprite.position.copy(midPoint);
-      labelSprite.frustumCulled = this.frustumCulled;
+      labelSprite.frustumCulled = false; 
+      
+ 
+      labelSprite.visible = line.visible;
       
       this.scene.add(labelSprite);
       this.lineLabels.push({
@@ -1303,7 +1306,7 @@ class ObjectManager {
     }
   
     updateLabels() {
-      // Update LODs if enabled
+      // Update LODs if enabled (keeping existing code)
       if (this.useLOD) {
         for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
           const nodeData = this.nodes.get(nodeId);
@@ -1313,7 +1316,7 @@ class ObjectManager {
         }
       }
     
-      // Original label update code
+      // Node labels update (keeping existing code)
       for (const [nodeId, label] of this.nodeLabels.entries()) {
         const node = this.nodeObjects.get(nodeId);
         if (node && node.visible) {
@@ -1336,49 +1339,59 @@ class ObjectManager {
           }
           
           label.scale.set(200 * scale, 50 * scale, 1);
-          
-         
           label.visible = distance <= this.maxVisibleDistance;
         } else if (node && !node.visible) {
           label.visible = false;
         }
       }
       
-      // Relationship labels update
-      for (const labelInfo of this.lineLabels) {
-        const startNode = this.nodeObjects.get(labelInfo.startId);
-        const endNode = this.nodeObjects.get(labelInfo.endId);
-    
-        if (startNode && endNode && startNode.visible && endNode.visible) {
-          const midPoint = new THREE.Vector3().addVectors(
-            startNode.position,
-            endNode.position
-          ).multiplyScalar(0.5);
-          
-          midPoint.y += 20;
-          
-          labelInfo.sprite.position.copy(midPoint);
-          labelInfo.sprite.lookAt(this.camera.position);
-          
-          const distance = this.camera.position.distanceTo(midPoint);
-          
-          let scale = 1; 
-          
-          if (distance > 5000) {
-            scale = 1;
-          } else if (distance > 2500) {
-            const progress = (5000 - distance) / 2500; 
-            scale = 0.1 + (2 * progress); 
-          } else if (distance > 100) {
-            const progress = (2500 - distance) / 2000; 
-            scale = 2 - (1 * progress); 
+      // Relationship labels update - FIXED VERSION
+      for (let i = 0; i < this.lineLabels.length; i++) {
+        const labelInfo = this.lineLabels[i];
+        const relLine = i < this.lineObjects.length ? this.lineObjects[i] : null;
+        
+        // Only update and show labels when the relationship line is visible
+        if (relLine && relLine.visible) {
+          const startNode = this.nodeObjects.get(labelInfo.startId);
+          const endNode = this.nodeObjects.get(labelInfo.endId);
+      
+          if (startNode && endNode) {
+            // For partially visible relationships, calculate best label position
+            // even if one of the nodes is not visible
+            const startPos = startNode.position;
+            const endPos = endNode.position;
+            
+            // Get the midpoint between visible nodes or closest visible point
+            const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
+            midPoint.y += 20; // Lift label slightly above the line
+            
+            labelInfo.sprite.position.copy(midPoint);
+            labelInfo.sprite.lookAt(this.camera.position);
+            
+            const distance = this.camera.position.distanceTo(midPoint);
+            
+            let scale = 1; 
+            
+            if (distance > 5000) {
+              scale = 1;
+            } else if (distance > 2500) {
+              const progress = (5000 - distance) / 2500; 
+              scale = 0.1 + (2 * progress); 
+            } else if (distance > 100) {
+              const progress = (2500 - distance) / 2000; 
+              scale = 2 - (1 * progress); 
+            } else {
+              scale = 1;
+            }
+            
+            labelInfo.sprite.scale.set(200 * scale, 50 * scale, 1);
+            labelInfo.sprite.visible = true;
           } else {
-            scale = 1;
+            // Edge case: relationships with missing nodes
+            labelInfo.sprite.visible = false;
           }
-          
-          labelInfo.sprite.scale.set(200 * scale, 50 * scale, 1);
-          labelInfo.sprite.visible = distance <= this.maxVisibleDistance;
         } else {
+          // Line is not visible, hide the label
           labelInfo.sprite.visible = false;
         }
       }
@@ -1642,23 +1655,48 @@ class ObjectManager {
         const startNodeId = line.userData.startId;
         const endNodeId = line.userData.endId;
         
-        const eitherNodeVisible = visibleNodes.has(startNodeId) || visibleNodes.has(endNodeId);
+     
+        const atLeastOneNodeVisible = visibleNodes.has(startNodeId) || visibleNodes.has(endNodeId);
         
-        if (line.visible !== eitherNodeVisible) {
-          linesToUpdate.push({ line, visible: eitherNodeVisible, index: i });
+        let isInFrustum = atLeastOneNodeVisible;
+        
+
+        if (!atLeastOneNodeVisible && this._frustum) {
+          const startNode = this.nodeObjects.get(startNodeId);
+          const endNode = this.nodeObjects.get(endNodeId);
+          
+          if (startNode && endNode) {
+        
+            const lineStart = startNode.position;
+            const lineEnd = endNode.position;
+            
+      
+            isInFrustum = this._frustum.containsPoint(lineStart) || 
+                          this._frustum.containsPoint(lineEnd) ||
+                          
+                          this._frustum.containsPoint(
+                            new THREE.Vector3().addVectors(lineStart, lineEnd).multiplyScalar(0.5)
+                          );
+          }
+        }
+        
+        const shouldBeVisible = isInFrustum;
+        
+        if (line.visible !== shouldBeVisible) {
+          linesToUpdate.push({ line, visible: shouldBeVisible, index: i });
         }
       }
-      
-   
+    
+    
       for (const update of linesToUpdate) {
         update.line.visible = update.visible;
         
         if (update.index < this.lineLabels.length) {
+         
           this.lineLabels[update.index].sprite.visible = update.visible;
         }
       }
     }
-
    
     
 
