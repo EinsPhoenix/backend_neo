@@ -63,7 +63,7 @@ class ObjectManager {
       }
     }
   
-    updateNodeLOD(nodeObject, nodeData, cameraPosition) {
+    updateNodeLOD(nodeObject, nodeData, cameraPosition, forceQualityCheck = false) {
       if (!this.useLOD || !nodeObject) return;
       
       const distance = cameraPosition.distanceTo(nodeObject.position);
@@ -76,43 +76,68 @@ class ObjectManager {
       const farThreshold = 10000;
       const mediumThreshold = 3000;
       
+      // Store current LOD before potentially changing it
+      const previousLOD = nodeObject.userData.currentLOD;
+      const isNewNode = previousLOD === undefined || previousLOD === 'none';
+      
+      // Get current quality mode
+      const isQualityMode = window.currentQualityMode === 'quality';
+      
+      // Track LOD change for quality reapplication
+      let lodChanged = false;
+      
       // If currently at far LOD, use different thresholds to prevent oscillation
       if (nodeObject.userData.currentLOD === 'far' && distance > farThreshold * 0.9) {
         // Keep far LOD
       } else if (nodeObject.userData.currentLOD === 'medium' && 
-                distance > mediumThreshold * 0.9 && 
-                distance < farThreshold * 1.1) {
+                 distance > mediumThreshold * 0.9 && 
+                 distance < farThreshold * 1.1) {
         // Keep medium LOD
-      } else if (distance > farThreshold) {
-        if (nodeObject.userData.currentLOD !== 'far') {
-          this.applyFarLOD(nodeObject, nodeData, baseSize);
-          nodeObject.userData.currentLOD = 'far';
-        }
-      } else if (distance > mediumThreshold) {
-        if (nodeObject.userData.currentLOD !== 'medium') {
-          this.applyMediumLOD(nodeObject, nodeData, baseSize);
-          nodeObject.userData.currentLOD = 'medium';
-        }
       } else {
-        if (nodeObject.userData.currentLOD !== 'close') {
-          this.applyCloseLOD(nodeObject, nodeData, baseSize);
-          nodeObject.userData.currentLOD = 'close';
+        // Decide LOD based on distance
+        if (distance > farThreshold) {
+          if (nodeObject.userData.currentLOD !== 'far') {
+            this.applyFarLOD(nodeObject, nodeData, baseSize, isQualityMode);
+            nodeObject.userData.currentLOD = 'far';
+            lodChanged = true;
+          }
+        } else if (distance > mediumThreshold) {
+          if (nodeObject.userData.currentLOD !== 'medium') {
+            this.applyMediumLOD(nodeObject, nodeData, baseSize, isQualityMode);
+            nodeObject.userData.currentLOD = 'medium';
+            lodChanged = true;
+          }
+        } else {
+          if (nodeObject.userData.currentLOD !== 'close') {
+            this.applyCloseLOD(nodeObject, nodeData, baseSize, isQualityMode);
+            nodeObject.userData.currentLOD = 'close';
+            lodChanged = true;
+          }
         }
       }
       
-      // Handle visibility based on distance with a buffer to prevent pop-in
+      // Apply quality consistently - when LOD changes OR forced check
+      if ((lodChanged || forceQualityCheck || isNewNode) && isQualityMode && !nodeObject.userData.qualityApplied) {
+        this.applyNodeQualityEffects(nodeObject, nodeData);
+      }
+      
+      // Handle visibility based on distance
       if (distance > this.maxVisibleDistance * 1.1) {
         if (nodeObject.visible) {
           nodeObject.visible = false;
-          this.visibleNodes.delete(nodeData.id);
+          if (this.nodeLabels.has(nodeData.id)) {
+            this.nodeLabels.get(nodeData.id).visible = false;
+          }
         }
       } else if (distance < this.maxVisibleDistance * 0.9 && !nodeObject.visible) {
         nodeObject.visible = true;
-        this.visibleNodes.add(nodeData.id);
+        if (this.nodeLabels.has(nodeData.id)) {
+          this.nodeLabels.get(nodeData.id).visible = true;
+        }
       }
     }
   
-    applyFarLOD(nodeObject, nodeData, baseSize) {
+    applyFarLOD(nodeObject, nodeData, baseSize, isQualityMode) {
       // Properly clean up existing materials and geometries
       this.cleanupNodeMeshResources(nodeObject);
       
@@ -121,15 +146,45 @@ class ObjectManager {
       
       // Use low-poly geometry for far LOD
       nodeObject.geometry = new THREE.OctahedronGeometry(baseSize * 0.8, 0);
-      nodeObject.material = new THREE.MeshBasicMaterial({
-        color: color,
-        emissive: color,
-        emissiveIntensity: 0.3,
-        wireframe: this.disableNiceMeshes
-      });
+      
+      // Use passed quality mode parameter
+      if (isQualityMode) {
+        // Apply high quality material immediately
+        nodeObject.material = new THREE.MeshPhysicalMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 0.3,
+          metalness: 0.7,
+          roughness: 0.4,
+          envMap: window.renderManager ? window.renderManager.envMap : null,
+          envMapIntensity: 0.8,
+          clearcoat: 0.3,
+          clearcoatRoughness: 0.2,
+          reflectivity: 0.5
+        });
+        // Set flag to indicate we've already applied quality
+        nodeObject.userData.qualityApplied = true;
+      } else {
+        // Use standard material
+        if (this.disableNiceMeshes) {
+          nodeObject.material = new THREE.MeshBasicMaterial({
+            color: color,
+            wireframe: true
+          });
+        } else {
+          nodeObject.material = new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.3,
+            flatShading: true,
+            roughness: 0.8
+          });
+        }
+      }
     }
   
-    applyMediumLOD(nodeObject, nodeData, baseSize) {
+    
+    applyMediumLOD(nodeObject, nodeData, baseSize, isQualityMode) {
       // Clear any children
       while (nodeObject.children.length > 0) {
         const child = nodeObject.children[0];
@@ -146,72 +201,159 @@ class ObjectManager {
       
       // Medium detail
       nodeObject.geometry = new THREE.SphereGeometry(baseSize * 0.8, 16, 12);
-      nodeObject.material = new THREE.MeshStandardMaterial({
-        color: color,
-        emissive: color,
-        emissiveIntensity: 0.5,
-        metalness: 0.8,
-        roughness: 0.7,
-        flatShading: true
-      });
-    }
-  
-    applyCloseLOD(nodeObject, nodeData, baseSize) {
-      // High detail - recreate the original detailed node
-      while (nodeObject.children.length > 0) {
-        const child = nodeObject.children[0];
-        if (child.material) child.material.dispose();
-        if (child.geometry) child.geometry.dispose();
-        nodeObject.remove(child);
-      }
       
-      if (nodeObject.geometry) nodeObject.geometry.dispose();
-      if (nodeObject.material) nodeObject.material.dispose();
+      // Get envMap safely
+      const envMap = window.renderManager ? window.renderManager.envMap : null;
       
-      const innerSize = baseSize * 0.8;
-      const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
-      const color = this.getColorForLabel(primaryLabel);
-  
-      if (this.disableNiceMeshes) {
-        // Simple high detail version
-        nodeObject.geometry = new THREE.SphereGeometry(baseSize * 0.8, 32, 24);
+      // Use passed quality mode parameter - this was missing!
+      if (isQualityMode) {
+        // Apply high quality material immediately
+        nodeObject.material = new THREE.MeshPhysicalMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 0.3,
+          metalness: 0.7,
+          roughness: 0.4,
+          envMap: envMap,
+          envMapIntensity: 0.8,
+          clearcoat: 0.4,
+          clearcoatRoughness: 0.3,
+          reflectivity: 0.6
+        });
+        
+        // Add atmospheric and cloud effects right away in quality mode - this is critical!
+        const nodeRadius = nodeObject.geometry.parameters?.radius || 30;
+        this.addAtmosphericEffects(nodeObject, color, nodeRadius);
+        this.addCloudLayer(nodeObject, color, envMap);
+        
+        // Set flag to indicate we've already applied quality
+        nodeObject.userData.qualityApplied = true;
+      } else {
         nodeObject.material = new THREE.MeshStandardMaterial({
           color: color,
           emissive: color,
           emissiveIntensity: 0.5,
-          metalness: 0.9,
-          roughness: 0.7
+          metalness: 0.8,
+          roughness: 0.7,
+          flatShading: true
         });
-      } else {
-        // Full detail with outer shell
-        const innerGeometry = new THREE.SphereGeometry(innerSize, 32, 32);
-        const innerMaterial = new THREE.MeshStandardMaterial({
-          color: color,
-          emissive: color,
-          emissiveIntensity: 0.5,
-          metalness: 0.9,
-          roughness: 0.7
-        });
-  
-        const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
-        innerMesh.position.set(0, 0, 0);
-        
-        const outerGeometry = new THREE.SphereGeometry(baseSize, 32, 32);
-        const outerMaterial = new THREE.MeshStandardMaterial({
-          color: color,
-          emissive: color,
-          emissiveIntensity: 0.5,
-          transparent: true,
-          opacity: 0.5,
-          metalness: 0.9,
-          roughness: 0.7
-        });
-  
-        nodeObject.geometry = outerGeometry;
-        nodeObject.material = outerMaterial;
-        nodeObject.add(innerMesh);
+        // Reset quality flag when not in quality mode
+        nodeObject.userData.qualityApplied = false;
       }
     }
+  
+    applyCloseLOD(nodeObject, nodeData, baseSize, isQualityMode) {
+  // High detail - recreate the original detailed node
+  while (nodeObject.children.length > 0) {
+    const child = nodeObject.children[0];
+    if (child.material) child.material.dispose();
+    if (child.geometry) child.geometry.dispose();
+    nodeObject.remove(child);
+  }
+  
+  if (nodeObject.geometry) nodeObject.geometry.dispose();
+  if (nodeObject.material) nodeObject.material.dispose();
+  
+  const innerSize = baseSize * 0.8;
+  const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
+  const color = this.getColorForLabel(primaryLabel);
+  
+  // Get envMap safely - ADD THIS LINE
+  const envMap = window.renderManager ? window.renderManager.envMap : null;
+  
+  // Use passed quality mode parameter instead of checking again
+  if (isQualityMode) {
+    // Full quality detail with outer shell
+    const innerGeometry = new THREE.SphereGeometry(innerSize, 32, 32);
+    const innerMaterial = new THREE.MeshPhysicalMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.4,
+      metalness: 0.8,
+      roughness: 0.3,
+      envMap: envMap,
+      envMapIntensity: 0.9,
+      clearcoat: 0.7,
+      clearcoatRoughness: 0.2,
+      reflectivity: 0.8
+    });
+
+    const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
+    innerMesh.position.set(0, 0, 0);
+    
+    const outerGeometry = new THREE.SphereGeometry(baseSize, 32, 32);
+    const outerMaterial = new THREE.MeshPhysicalMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.3,
+      transparent: true,
+      opacity: 0.6,
+      metalness: 0.7,
+      roughness: 0.4,
+      envMap: envMap,
+      envMapIntensity: 0.7,
+      clearcoat: 0.5,
+      clearcoatRoughness: 0.3,
+      reflectivity: 0.7
+    });
+
+    nodeObject.geometry = outerGeometry;
+    nodeObject.material = outerMaterial;
+    nodeObject.add(innerMesh);
+    
+    // Set flag to indicate we've already applied quality
+    nodeObject.userData.qualityApplied = true;
+    
+    // Add atmospheric and cloud effects right away in quality mode
+    const nodeRadius = nodeObject.geometry.parameters?.radius || 30;
+    this.addAtmosphericEffects(nodeObject, color, nodeRadius);
+    this.addCloudLayer(nodeObject, color, envMap);
+    
+  } else if (this.disableNiceMeshes) {
+    // Simple high detail version
+    nodeObject.geometry = new THREE.SphereGeometry(baseSize * 0.8, 32, 24);
+    nodeObject.material = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.5,
+      metalness: 0.9,
+      roughness: 0.7
+    });
+    // Reset quality flag when not in quality mode
+    nodeObject.userData.qualityApplied = false;
+  } else {
+    // Full detail with outer shell
+    const innerGeometry = new THREE.SphereGeometry(innerSize, 32, 32);
+    const innerMaterial = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.5,
+      metalness: 0.9,
+      roughness: 0.7
+    });
+
+    const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
+    innerMesh.position.set(0, 0, 0);
+    
+    const outerGeometry = new THREE.SphereGeometry(baseSize, 32, 32);
+    const outerMaterial = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.5,
+      transparent: true,
+      opacity: 0.5,
+      metalness: 0.9,
+      roughness: 0.7
+    });
+
+    nodeObject.geometry = outerGeometry;
+    nodeObject.material = outerMaterial;
+    nodeObject.add(innerMesh);
+    
+    // Reset quality flag when not in quality mode
+    nodeObject.userData.qualityApplied = false;
+  }
+}
   
     createTextLabel(text, color = 0xffffff) {
       const canvas = document.createElement('canvas');
@@ -290,11 +432,28 @@ class ObjectManager {
       const primaryLabel = nodeData.labels[0] || `Node ${id}`;
       const color = this.getColorForLabel(primaryLabel);
       
-      const material = new THREE.MeshBasicMaterial({
-        color: color,
-        emissive: color,
-        emissiveIntensity: 0.3
-      });
+      // Check quality mode BEFORE creating initial material
+      const isQualityMode = window.renderManager && window.renderManager.currentQualityMode === 'quality';
+      
+      // Use different initial material based on quality mode
+      const material = isQualityMode ? 
+        new THREE.MeshPhysicalMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 0.3,
+          metalness: 0.7,
+          roughness: 0.4,
+          envMap: window.renderManager ? window.renderManager.envMap : null,
+          envMapIntensity: 0.8,
+          clearcoat: 0.6,
+          clearcoatRoughness: 0.2,
+          reflectivity: 0.8
+        }) :
+        new THREE.MeshStandardMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 0.3
+        });
       
       const nodeMesh = new THREE.Mesh(geometry, material);
       nodeMesh.position.set(
@@ -308,19 +467,23 @@ class ObjectManager {
         labels: nodeData.labels,
         properties: nodeData.properties,
         type: 'node',
-        currentLOD: 'none' 
+        currentLOD: 'none',
+        qualityApplied: isQualityMode // Track quality application from the start
       };
       
-    
       nodeMesh.frustumCulled = this.frustumCulled;
       
       this.scene.add(nodeMesh);
       this.nodeObjects.set(id, nodeMesh);
       
-     
-      this.updateNodeLOD(nodeMesh, nodeData, this.camera.position);
+      // Now update LOD after basic setup is complete
+      this.updateNodeLOD(nodeMesh, nodeData, this.camera.position, true); // Force quality check
       
-    
+      // If in quality mode, explicitly apply quality effects now
+      if (isQualityMode) {
+        this.applyNodeQualityEffects(nodeMesh, nodeData);
+      }
+      
       const labelText = primaryLabel;
       const labelSprite = this.createTextLabel(labelText, color);
       labelSprite.position.set(
@@ -656,8 +819,12 @@ class ObjectManager {
       
       const originalColor = node.userData.originalColor || node.material.color.getHex();
       node.userData.originalColor = originalColor;
-      node.userData.originalEmissive = node.material.emissive ? node.material.emissive.getHex() : 0xffffff;
-      node.userData.originalEmissiveIntensity = node.material.emissiveIntensity || 0.5;
+      
+      // Only store emissive properties if the material supports it
+      if (node.material.emissive) {
+        node.userData.originalEmissive = node.material.emissive.getHex();
+        node.userData.originalEmissiveIntensity = node.material.emissiveIntensity || 0.5;
+      }
       
       // Store original materials if we have children (for complex nodes)
       if (node.children && node.children.length > 0) {
@@ -665,18 +832,36 @@ class ObjectManager {
         node.children.forEach((child, index) => {
           if (child.material) {
             node.userData.childrenOriginalMaterials[index] = {
-              emissive: child.material.emissive ? child.material.emissive.getHex() : 0xffffff,
-              emissiveIntensity: child.material.emissiveIntensity || 0.5
+              color: child.material.color ? child.material.color.getHex() : 0xffffff
             };
-            child.material.emissiveIntensity = 1.5;
+            
+            // Only store emissive properties if the material supports it
+            if (child.material.emissive) {
+              node.userData.childrenOriginalMaterials[index].emissive = 
+                child.material.emissive.getHex();
+              node.userData.childrenOriginalMaterials[index].emissiveIntensity = 
+                child.material.emissiveIntensity || 0.5;
+            }
+            
+            // Apply highlight effect to child material
+            if (child.material.emissive) {
+              child.material.emissive.setHex(0xffffff);
+              child.material.emissiveIntensity = 1.5;
+            } else {
+              // For materials without emissive, modify color instead
+              child.material.color.setHex(0xffffff);
+            }
           }
         });
       }
       
-      // Apply highlight effect
+      // Apply highlight effect to main material
       if (node.material.emissive) {
         node.material.emissive.setHex(0xffffff);
         node.material.emissiveIntensity = 1.5;
+      } else {
+        // For materials without emissive, modify color instead
+        node.material.color.setHex(0xffffff);
       }
     }
   
@@ -694,11 +879,17 @@ class ObjectManager {
       if (!object || !object.material) return;
       
       if (object.userData.type === 'node') {
+        // Restore emissive properties only if the material supports it
         if (object.material.emissive && object.userData.originalEmissive !== undefined) {
           object.material.emissive.setHex(object.userData.originalEmissive);
         }
-        if (object.userData.originalEmissiveIntensity !== undefined) {
+        if (object.userData.originalEmissiveIntensity !== undefined && object.material.emissive) {
           object.material.emissiveIntensity = object.userData.originalEmissiveIntensity;
+        }
+        
+        // Always restore original color
+        if (object.userData.originalColor !== undefined) {
+          object.material.color.setHex(object.userData.originalColor);
         }
         
         // Restore children materials if any
@@ -706,10 +897,16 @@ class ObjectManager {
           object.children.forEach((child, index) => {
             const originalMaterial = object.userData.childrenOriginalMaterials[index];
             if (child.material && originalMaterial) {
+              // Restore color
+              if (originalMaterial.color !== undefined) {
+                child.material.color.setHex(originalMaterial.color);
+              }
+              
+              // Restore emissive properties only if material supports it
               if (child.material.emissive && originalMaterial.emissive !== undefined) {
                 child.material.emissive.setHex(originalMaterial.emissive);
               }
-              if (originalMaterial.emissiveIntensity !== undefined) {
+              if (originalMaterial.emissiveIntensity !== undefined && child.material.emissive) {
                 child.material.emissiveIntensity = originalMaterial.emissiveIntensity;
               }
             }
@@ -823,9 +1020,12 @@ class ObjectManager {
       
       const nodeCount = this.nodeObjects.size;
       
-      // Create instanced mesh
+      // Create instanced mesh with a MeshStandardMaterial instead of MeshBasicMaterial
       const geometry = new THREE.SphereGeometry(30, 8, 6);
-      const material = new THREE.MeshBasicMaterial();
+      const material = new THREE.MeshStandardMaterial({
+        metalness: 0.3,
+        roughness: 0.7
+      });
       
       const instancedMesh = new THREE.InstancedMesh(
         geometry,
@@ -1005,7 +1205,7 @@ class ObjectManager {
         const isVisible = isInFrustum && distance <= this.maxVisibleDistance;
         
         if (isVisible !== nodeObject.visible) {
-          nodesToUpdate.push({ node: nodeObject, visible: isVisible });
+          nodesToUpdate.push({ node: nodeObject, visible: isVisible, nodeId: nodeId });
         }
         
         if (isVisible) {
@@ -1016,6 +1216,17 @@ class ObjectManager {
     
       for (const update of nodesToUpdate) {
         update.node.visible = update.visible;
+        
+        // Apply quality effects when nodes become visible
+        if (update.visible && 
+            window.renderManager && 
+            window.renderManager.currentQualityMode === 'quality' &&
+            !update.node.userData.qualityApplied) {
+          const nodeData = this.nodes.get(update.nodeId);
+          if (nodeData) {
+            this.applyNodeQualityEffects(update.node, nodeData);
+          }
+        }
       }
       
      
@@ -1061,81 +1272,202 @@ class ObjectManager {
 
    
     
-    
 
     getPerformanceIsEnabled() {
       return this.isPerformanceModeEnabled;
     }
 
     applyQualityMaterials(envMap) {
+      // Force setting currentQualityMode to 'quality'
+      if (window.renderManager) {
+        window.renderManager.currentQualityMode = 'quality';
+      }
+      
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
         const nodeData = this.nodes.get(nodeId);
         if (!nodeData) continue;
         
+        // Reset quality applied flag to ensure proper update
+        nodeObject.userData.qualityApplied = false;
+        
+        // Force material update
         const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
         const color = this.getColorForLabel(primaryLabel);
         
-    
+        // Remove existing atmospheric layers and cloud mesh
+        if (nodeObject.userData.atmosphereLayers) {
+          for (const layer of nodeObject.userData.atmosphereLayers) {
+            if (layer && layer.parent === nodeObject) {
+              if (layer.material) layer.material.dispose();
+              if (layer.geometry) layer.geometry.dispose();
+              nodeObject.remove(layer);
+            }
+          }
+          nodeObject.userData.atmosphereLayers = [];
+        }
+        
+        if (nodeObject.userData.cloudMesh) {
+          nodeObject.remove(nodeObject.userData.cloudMesh);
+          if (nodeObject.userData.cloudMesh.material) {
+            nodeObject.userData.cloudMesh.material.dispose();
+          }
+          if (nodeObject.userData.cloudMesh.geometry) {
+            nodeObject.userData.cloudMesh.geometry.dispose();
+          }
+          nodeObject.userData.cloudMesh = null;
+        }
+        
+        // Clean up existing material
         if (nodeObject.material) {
           nodeObject.material.dispose();
         }
-
-        const material = new THREE.MeshPhysicalMaterial({
-          color: color,
-          emissive: color,
-          emissiveIntensity: 0.3,
-          metalness: 0.8,
-          roughness: 0.2,
-          envMap: envMap,
-          envMapIntensity: 1.0,
-          clearcoat: 0.5,
-          clearcoatRoughness: 0.3,
-          reflectivity: 1.0
-        });
         
-        nodeObject.material = material;
+        // Determine node radius based on current geometry
+        const nodeRadius = nodeObject.geometry.parameters?.radius || 30;
         
-   
-        if (!nodeObject.userData.glowMesh) {
-          const glowGeometry = new THREE.SphereGeometry(
-            nodeObject.geometry.parameters?.radius * 1.2 || 30, 
-            32, 
-            32
-          );
-          
-          const glowMaterial = new THREE.MeshBasicMaterial({
+        // Create planetary surface material with enhanced features based on LOD
+        if (nodeObject.userData.currentLOD === 'far') {
+          nodeObject.material = new THREE.MeshPhysicalMaterial({
             color: color,
-            transparent: true,
-            opacity: 0.2,
-            side: THREE.BackSide
+            emissive: color,
+            emissiveIntensity: 0.3,
+            metalness: 0.7,
+            roughness: 0.4,
+            envMap: envMap,
+            envMapIntensity: 0.8,
+            clearcoat: 0.3,
+            clearcoatRoughness: 0.2,
+            reflectivity: 0.5
           });
+          this.addAtmosphericEffects(nodeObject, color, nodeRadius);
+          this.addCloudLayer(nodeObject, color, envMap);
+        }
+        else if (nodeObject.userData.currentLOD === 'medium') {
+          nodeObject.material = new THREE.MeshPhysicalMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.3,
+            metalness: 0.7,
+            roughness: 0.4,
+            envMap: envMap,
+            envMapIntensity: 0.8,
+            clearcoat: 0.4,
+            clearcoatRoughness: 0.3,
+            reflectivity: 0.6
+          });
+          this.addAtmosphericEffects(nodeObject, color, nodeRadius);
+          this.addCloudLayer(nodeObject, color, envMap);
+        }
+        else { // close or default
+          // For close LOD, create a more complex object with inner and outer shells
           
-          const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-          nodeObject.add(glowMesh);
-          nodeObject.userData.glowMesh = glowMesh;
-        } else {
-          nodeObject.userData.glowMesh.visible = true;
+          // First, clear any existing children
+          while (nodeObject.children.length > 0) {
+            const child = nodeObject.children[0];
+            if (child.material) child.material.dispose();
+            if (child.geometry) child.geometry.dispose();
+            nodeObject.remove(child);
+          }
+          
+          if (nodeObject.geometry) nodeObject.geometry.dispose();
+          
+          const innerSize = nodeRadius * 0.8;
+          const outerSize = nodeRadius;
+          
+          const innerGeometry = new THREE.SphereGeometry(innerSize, 32, 32);
+          const innerMaterial = new THREE.MeshPhysicalMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.4,
+            metalness: 0.8,
+            roughness: 0.3,
+            envMap: envMap,
+            envMapIntensity: 0.9,
+            clearcoat: 0.7,
+            clearcoatRoughness: 0.2,
+            reflectivity: 0.8
+          });
+  
+          const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
+          innerMesh.position.set(0, 0, 0);
+          
+          const outerGeometry = new THREE.SphereGeometry(outerSize, 32, 32);
+          const outerMaterial = new THREE.MeshPhysicalMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.3,
+            transparent: true,
+            opacity: 0.6,
+            metalness: 0.7,
+            roughness: 0.4,
+            envMap: envMap,
+            envMapIntensity: 0.7,
+            clearcoat: 0.5,
+            clearcoatRoughness: 0.3,
+            reflectivity: 0.7
+          });
+  
+          nodeObject.geometry = outerGeometry;
+          nodeObject.material = outerMaterial;
+          nodeObject.add(innerMesh);
+          
+          // Add atmospheric and cloud effects
+          this.addAtmosphericEffects(nodeObject, color, nodeRadius);
+          this.addCloudLayer(nodeObject, color, envMap);
         }
         
+        // Mark as quality applied
+        nodeObject.userData.qualityApplied = true;
+      }
       
-        this.updateNodeLOD(nodeObject, nodeData, this.camera.position);
+      // Initialize cloud texture cache if needed
+      if (!this._cloudTextureCache) {
+        this._cloudTextureCache = this.generateCloudTexture();
       }
     }
     
     applyStandardMaterials() {
+      // Force setting currentQualityMode to 'standard'
+      if (window.renderManager) {
+        window.renderManager.currentQualityMode = 'standard';
+      }
+      
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
         const nodeData = this.nodes.get(nodeId);
         if (!nodeData) continue;
         
-        const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
-        const color = this.getColorForLabel(primaryLabel);
+        // Reset the quality applied flag
+        nodeObject.userData.qualityApplied = false;
         
-       
+        // Remove quality-specific effects
         if (nodeObject.userData.glowMesh) {
           nodeObject.userData.glowMesh.visible = false;
         }
         
-   
+        // Remove atmospheric effects and cloud mesh
+        if (nodeObject.userData.atmosphereLayers) {
+          for (const layer of nodeObject.userData.atmosphereLayers) {
+            if (layer && layer.parent === nodeObject) {
+              if (layer.material) layer.material.dispose();
+              if (layer.geometry) layer.geometry.dispose();
+              nodeObject.remove(layer);
+            }
+          }
+          nodeObject.userData.atmosphereLayers = [];
+        }
+        
+        if (nodeObject.userData.cloudMesh) {
+          nodeObject.remove(nodeObject.userData.cloudMesh);
+          if (nodeObject.userData.cloudMesh.material) {
+            nodeObject.userData.cloudMesh.material.dispose();
+          }
+          if (nodeObject.userData.cloudMesh.geometry) {
+            nodeObject.userData.cloudMesh.geometry.dispose();
+          }
+          nodeObject.userData.cloudMesh = null;
+        }
+        
+        // Now update node LOD with standard materials
         this.updateNodeLOD(nodeObject, nodeData, this.camera.position);
       }
     }
@@ -1148,30 +1480,6 @@ class ObjectManager {
         }
         
       
-      }
-    }
-    
-    updateQualityAnimations(time) {
-     
-      for (const nodeObject of this.nodeObjects.values()) {
-        if (nodeObject.userData.glowMesh && nodeObject.userData.glowMesh.visible) {
-          const pulse = Math.sin(time * 2) * 0.1 + 0.9; 
-          
-          nodeObject.userData.glowMesh.scale.set(pulse, pulse, pulse);
-          
-          
-          nodeObject.userData.glowMesh.material.opacity = 0.1 + Math.sin(time * 3) * 0.05;
-        }
-      }
-      
-    
-      if (this.edgeGlowEnabled) {
-        for (const line of this.lineObjects) {
-          if (line.userData.glowLine) {
-            const glow = line.userData.glowLine;
-            glow.material.opacity = 0.3 + Math.sin(time * 2 + line.userData.id % 10) * 0.1;
-          }
-        }
       }
     }
     
@@ -1297,6 +1605,323 @@ class ObjectManager {
         } else if (nodeObject.material.dispose) {
           nodeObject.material.dispose();
         }
+      }
+    }
+
+    applyNodeQualityEffects(nodeObject, nodeData) {
+      // Get color for the node
+      const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
+      const color = this.getColorForLabel(primaryLabel);
+      
+      // Mark this node as having quality applied
+      nodeObject.userData.qualityApplied = true;
+      
+      // Enhance the existing material
+      if (nodeObject.material) {
+        if (window.renderManager && window.renderManager.envMap) {
+          nodeObject.material.envMap = window.renderManager.envMap;
+          nodeObject.material.envMapIntensity = 0.8;
+          nodeObject.material.needsUpdate = true;
+        }
+    
+        if (nodeObject.material.type === 'MeshStandardMaterial' || 
+            nodeObject.material.type === 'MeshPhysicalMaterial') {
+          nodeObject.material.metalness = 0.7;
+          nodeObject.material.roughness = 0.4;
+          nodeObject.material.emissive = new THREE.Color(color);
+          nodeObject.material.emissiveIntensity = 0.3;
+          
+       
+          if (nodeObject.material.type !== 'MeshPhysicalMaterial') {
+            const oldMaterial = nodeObject.material;
+            const newMaterial = new THREE.MeshPhysicalMaterial({
+              color: oldMaterial.color.clone(),
+              emissive: oldMaterial.emissive.clone(),
+              emissiveIntensity: oldMaterial.emissiveIntensity,
+              metalness: 0.7,
+              roughness: 0.4,
+              envMap: window.renderManager ? window.renderManager.envMap : null,
+              envMapIntensity: 0.8,
+              clearcoat: 0.6,
+              clearcoatRoughness: 0.2,
+              reflectivity: 0.8
+            });
+            nodeObject.material.dispose();
+            nodeObject.material = newMaterial;
+          }
+        }
+      }
+      
+      // Add atmospheric effects if they don't already exist
+      const nodeRadius = nodeObject.geometry.parameters?.radius || 30;
+      
+      // Remove existing atmospheric layers before adding new ones to prevent duplicates
+      if (nodeObject.userData.atmosphereLayers) {
+        for (const layer of nodeObject.userData.atmosphereLayers) {
+          if (layer && layer.parent === nodeObject) {
+            if (layer.material) layer.material.dispose();
+            if (layer.geometry) layer.geometry.dispose();
+            nodeObject.remove(layer);
+          }
+        }
+      }
+      
+      this.addAtmosphericEffects(nodeObject, color, nodeRadius);
+      
+      // Add or update cloud layer
+      if (nodeObject.userData.cloudMesh) {
+        nodeObject.remove(nodeObject.userData.cloudMesh);
+        nodeObject.userData.cloudMesh.material.dispose();
+        nodeObject.userData.cloudMesh.geometry.dispose();
+        nodeObject.userData.cloudMesh = null;
+      }
+      
+      this.addCloudLayer(nodeObject, color, window.renderManager ? window.renderManager.envMap : null);
+    }
+    
+    addAtmosphericEffects(nodeObject, color, nodeRadius) {
+     console.log('addAtmosphericEffects', nodeObject, color, nodeRadius);
+      if (nodeObject.userData.atmosphereLayers) {
+        for (const layer of nodeObject.userData.atmosphereLayers) {
+          if (layer && layer.parent === nodeObject) {
+            if (layer.material) layer.material.dispose();
+            if (layer.geometry) layer.geometry.dispose();
+            nodeObject.remove(layer);
+          }
+        }
+      }
+      
+      const atmosphereLayers = [];
+      
+      // Add outer glow atmosphere
+      const atmoGeometry = new THREE.SphereGeometry(nodeRadius * 1.3, 32, 32);
+      const atmoMaterial = new THREE.MeshPhysicalMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.15,
+        side: THREE.BackSide,
+        envMap: window.renderManager ? window.renderManager.envMap : null,
+        envMapIntensity: 0.4,
+        roughness: 1.0,
+        metalness: 0.0,
+        clearcoat: 0.0,
+        transmission: 0.9,
+        ior: 1.2
+      });
+      
+      const atmosphereMesh = new THREE.Mesh(atmoGeometry, atmoMaterial);
+      atmosphereMesh.userData.type = 'atmosphere';
+      nodeObject.add(atmosphereMesh);
+      atmosphereLayers.push(atmosphereMesh);
+      
+      // Add polar glow effect
+      const polarGeometry = new THREE.RingGeometry(nodeRadius * 0.5, nodeRadius * 0.9, 32);
+      const polarMaterial = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(color).multiplyScalar(1.5),
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending
+      });
+      
+      const polarRing = new THREE.Mesh(polarGeometry, polarMaterial);
+      polarRing.rotation.x = Math.PI / 2;
+      polarRing.position.y = nodeRadius * 0.7;
+      polarRing.userData.type = 'polarRing';
+      nodeObject.add(polarRing);
+      atmosphereLayers.push(polarRing);
+      
+      // Store atmosphere references for animation and cleanup
+      nodeObject.userData.atmosphereLayers = atmosphereLayers;
+      console.log('addAtmosphericEffects', nodeObject, color, nodeRadius);
+      return atmosphereLayers;
+    }
+    
+    addCloudLayer(nodeObject, color, envMap) {
+      console.log('addCloudLayer', nodeObject, color, envMap);
+      // Only add if not already present
+      if (!nodeObject.userData.cloudMesh) {
+        const nodeRadius = nodeObject.geometry.parameters?.radius || 30;
+        const cloudGeometry = new THREE.SphereGeometry(nodeRadius * 1.05, 24, 24);
+        const cloudMaterial = new THREE.MeshPhysicalMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0.4,
+          alphaMap: this.getCloudTexture(),
+          envMap: envMap,
+          roughness: 1.0,
+          metalness: 0.0,
+          transmission: 0.2
+        });
+        
+        const cloudMesh = new THREE.Mesh(cloudGeometry, cloudMaterial);
+        cloudMesh.rotation.y = Math.random() * Math.PI * 2;
+        cloudMesh.rotation.x = Math.random() * Math.PI * 0.2;
+        cloudMesh.userData.type = 'cloudLayer';
+        nodeObject.add(cloudMesh);
+        nodeObject.userData.cloudMesh = cloudMesh;
+        
+        // Add cloud rotation animation data
+        nodeObject.userData.cloudRotationSpeed = 0.0003 + Math.random() * 0.0005;
+        nodeObject.userData.cloudRotationAxis = new THREE.Vector3(
+          Math.random() * 0.2 - 0.1,
+          1,
+          Math.random() * 0.2 - 0.1
+        ).normalize();
+      }
+    }
+
+    updateQualityAnimations(time) {
+      // Skip if no nodes or animations are disabled
+      if (this.nodeObjects.size === 0) return;
+    
+      // Animate all nodes with quality effects
+      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+        // Skip nodes without quality effects
+        if (!nodeObject.userData.qualityApplied) continue;
+        
+        // Animate atmosphere layers
+        if (nodeObject.userData.atmosphereLayers) {
+          for (const layer of nodeObject.userData.atmosphereLayers) {
+            if (layer.userData.type === 'polarRing') {
+              // Rotate polar rings
+              layer.rotation.z = time * 0.2;
+            }
+          }
+        }
+        
+        // Animate cloud layers
+        if (nodeObject.userData.cloudMesh) {
+          // Rotate clouds slowly
+          nodeObject.userData.cloudMesh.rotation.y = time * 0.05;
+          
+          // Pulse cloud opacity for visual effect
+          const pulseFactor = 0.7 + Math.sin(time * 0.3) * 0.1;
+          if (nodeObject.userData.cloudMesh.material) {
+            nodeObject.userData.cloudMesh.material.opacity = 0.4 * pulseFactor;
+          }
+        }
+      }
+    }
+    
+    generateCloudTexture(color = 0xffffff) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = 512;
+      canvas.height = 512;
+      
+      // Clear canvas
+      ctx.fillStyle = 'rgba(0,0,0,0)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Convert color to RGB
+      const r = (color >> 16) & 255;
+      const g = (color >> 8) & 255;
+      const b = color & 255;
+      
+      // Draw cloud-like patterns
+      const cloudColor = `rgba(${r}, ${g}, ${b}, 0.1)`;
+      ctx.fillStyle = cloudColor;
+      
+      // Generate random cloud shapes
+      const numShapes = 50;
+      for (let i = 0; i < numShapes; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const radius = 20 + Math.random() * 60;
+        
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Apply Gaussian blur for smoother clouds
+      ctx.filter = 'blur(16px)';
+      ctx.drawImage(canvas, 0, 0);
+      ctx.filter = 'none';
+      
+      // Create texture from canvas
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      
+      return texture;
+    }
+
+    getCloudTexture() {
+      // Cache the cloud texture to avoid regenerating it every time
+      if (!this._cloudTextureCache) {
+        this._cloudTextureCache = this.generateCloudTexture();
+      }
+      return this._cloudTextureCache;
+    }
+
+    forceApplyQualityToAllNodes() {
+      // Check if renderManager exists and get the current quality mode
+      const isQualityMode = window.currentQualityMode === 'quality';
+
+      console.log(`wtf ${window.currentQualityMode}`);
+      
+      console.log(`Force applying quality mode to all nodes: ${isQualityMode ? 'quality' : 'standard'}`);
+      
+      // Process all nodes
+      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+        const nodeData = this.nodes.get(nodeId);
+        if (!nodeData || !nodeObject) continue;
+        
+        // Reset quality flags to ensure proper reapplication
+        nodeObject.userData.qualityApplied = false;
+        
+        // Clean up any existing atmospheric effects
+        this.cleanupQualityEffects(nodeObject);
+        
+        // Apply materials based on LOD level and quality mode
+        const distance = this.camera.position.distanceTo(nodeObject.position);
+        
+        if (distance > 10000) {  // Far LOD threshold
+          nodeObject.userData.currentLOD = 'far';
+          this.applyFarLOD(nodeObject, nodeData, 20 + Math.min(70, nodeData.connections * 5), isQualityMode);
+        } 
+        else if (distance > 3000) {  // Medium LOD threshold
+          nodeObject.userData.currentLOD = 'medium';
+          this.applyMediumLOD(nodeObject, nodeData, 20 + Math.min(70, nodeData.connections * 5), isQualityMode);
+        }
+        else {  
+          nodeObject.userData.currentLOD = 'close';
+          this.applyCloseLOD(nodeObject, nodeData, 20 + Math.min(70, nodeData.connections * 5), isQualityMode);
+        }
+        
+        // For quality mode, ensure effects are applied
+        if (isQualityMode) {
+          this.applyNodeQualityEffects(nodeObject, nodeData);
+          nodeObject.userData.qualityApplied = true;
+        }
+      }
+    }
+    
+    // Add helper function to clean up quality effects
+    cleanupQualityEffects(nodeObject) {
+      // Remove atmosphere layers
+      if (nodeObject.userData.atmosphereLayers) {
+        for (const layer of nodeObject.userData.atmosphereLayers) {
+          if (layer && layer.parent === nodeObject) {
+            if (layer.material) layer.material.dispose();
+            if (layer.geometry) layer.geometry.dispose();
+            nodeObject.remove(layer);
+          }
+        }
+        nodeObject.userData.atmosphereLayers = [];
+      }
+      
+      // Remove cloud mesh
+      if (nodeObject.userData.cloudMesh) {
+        nodeObject.remove(nodeObject.userData.cloudMesh);
+        if (nodeObject.userData.cloudMesh.material) {
+          nodeObject.userData.cloudMesh.material.dispose();
+        }
+        if (nodeObject.userData.cloudMesh.geometry) {
+          nodeObject.userData.cloudMesh.geometry.dispose();
+        }
+        nodeObject.userData.cloudMesh = null;
       }
     }
   }

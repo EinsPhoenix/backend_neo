@@ -25,6 +25,7 @@ class RenderManager {
       this.textureCache = new Map();
       this.cubemapCache = new Map();
       this.initProfiler();
+      
     }
   
     init() {
@@ -288,12 +289,15 @@ class RenderManager {
     applyRenderOption(option) {
       switch(option) {
         case 'Qualität':
+          window.currentQualityMode = 'quality';
           this.applyQualityPreset('quality');
           break;
         case 'Standard':
+          window.currentQualityMode = 'standard';
           this.applyQualityPreset('standard');
           break;
         case 'Performance':
+          window.currentQualityMode = 'performance';
           this.applyQualityPreset('performance');
           break;
       }
@@ -614,8 +618,7 @@ class RenderManager {
       // Remember this for the next frame
       this.lastPerformanceLevel = performanceLevel;
       
-      // If the ObjectManager has an updateNodeLODs method, we can call it
-      // to refresh LOD based on current camera position
+    
       if (typeof window.objectManager.updateNodeLODs === 'function') {
         window.objectManager.updateNodeLODs();
       }
@@ -774,51 +777,20 @@ class RenderManager {
       const presets = this.getQualityPresets();
       const preset = presets[presetName] || presets.standard;
       
-      this.startProfiling('applyQualityPreset');
       
+      window.currentQualityMode = presetName;
+      console.log(`Applying quality preset: ${presetName}`);
+      
+      this.startProfiling('applyQualityPreset');
       
       let canApplyFullPreset = true;
       
-      if (presetName === 'quality') {
-        
-        if (!this.availableEffects) {
-          this.checkEffectsAvailability();
-        }
-        
-        if (preset.bloom?.enabled && !this.availableEffects.bloomPass) {
-          console.warn("Bloom effect requested but not available. Some visual features will be disabled.");
-          canApplyFullPreset = false;
-        }
-        
-        if (preset.ssao?.enabled && !this.availableEffects.ssaoPass) {
-          console.warn("SSAO effect requested but not available. Some visual features will be disabled.");
-          canApplyFullPreset = false;
-        }
+      // Check available effects
+      if (!this.availableEffects) {
+        this.checkEffectsAvailability();
       }
       
-    
-      if (preset.bloom && this.bloomPass) {
-        this.bloomPass.enabled = preset.bloom.enabled;
-        if (preset.bloom.enabled) {
-          this.bloomPass.strength = preset.bloom.strength || 0;
-          this.bloomPass.radius = preset.bloom.radius || 0;
-          this.bloomPass.threshold = preset.bloom.threshold || 1;
-        }
-      }
-      
-    
-      if (preset.ssao) {
-        if (preset.ssao.enabled && this.availableEffects?.ssaoPass) {
-          const ssaoEnabled = this.setupSSAO();
-          if (!ssaoEnabled) {
-            console.warn("Failed to enable SSAO effect.");
-          }
-        } else if (this.ssaoPass) {
-          this.ssaoPass.enabled = false;
-        }
-      }
-      
-    
+      // Apply renderer settings based on preset
       if (preset.shadows) {
         this.renderer.shadowMap.enabled = preset.shadows.enabled;
         if (preset.shadows.enabled && preset.shadows.type) {
@@ -829,52 +801,43 @@ class RenderManager {
       this.renderer.antialias = preset.antialias || false;
       this.renderer.setPixelRatio(preset.pixelRatio || 1);
       
-
+      // Configure LOD and distance settings
       this.configureLOD(preset.lod?.enabled || false, {
         bias: preset.lod?.bias || 1.0
       });
       
-   
       if (preset.renderDistance) {
         this.setRenderDistance(preset.renderDistance);
       }
       
-   
+      // Apply object manager settings based on quality preset
       if (window.objectManager) {
-        switch(presetName) {
-          case 'quality':
-            window.objectManager.setPerformanceMode(false);
-            window.objectManager.applyQualityMaterials(this.envMap);
-            window.objectManager.enableEdgeGlow(canApplyFullPreset); 
-            break;
-          case 'standard':
-            window.objectManager.setPerformanceMode(false);
-            window.objectManager.applyStandardMaterials();
-            window.objectManager.enableEdgeGlow(false);
-            break;
-          case 'performance':
-            window.objectManager.setPerformanceMode(true);
-            window.objectManager.applyPerformanceMaterials();
-            window.objectManager.enableEdgeGlow(false);
-            break;
+        // Turn performance mode on/off as needed
+        window.objectManager.setPerformanceMode(presetName === 'performance');
+        
+        // Force update all node materials to match the current quality preset
+        // This ensures consistent appearance for all nodes
+        if (presetName === 'quality') {
+          window.objectManager.forceApplyQualityToAllNodes();
+        } else if (presetName === 'standard') {
+          window.objectManager.applyStandardMaterials();
+        } else if (presetName === 'performance') {
+          window.objectManager.applyPerformanceMaterials();
         }
       }
       
-
+      // Apply remaining settings
       this.disableAnimations = presetName === 'performance';
       this.disableNiceMeshes = presetName === 'performance';
       this.displayAllLabels(presetName !== 'performance');
       
-  
       if (window.addStarsToScene) {
         window.addStarsToScene(presetName === 'quality', presetName === 'quality');
       }
-
+  
       this.updateEventBusHandler();
-      
       this.endProfiling('applyQualityPreset');
       
-   
       this.loadingIndicator.textContent = this.getQualityModeDescription(presetName, canApplyFullPreset);
     }
     

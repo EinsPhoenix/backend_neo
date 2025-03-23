@@ -874,7 +874,7 @@ mod tests {
     async fn test_export_all_with_relationships() {
         let graph = get_graph().await;
         
-        let result = export_all_with_relationships(&graph, Some(20000)).await;
+        let result = export_all_with_relationships(&graph, Some(5000)).await;
         
     
         assert!(result.is_some(), "Exportfunktion sollte Some(Value) zurückgeben");
