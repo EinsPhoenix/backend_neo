@@ -434,7 +434,7 @@ class RenderManager {
         this.startProfiling('fullRender');
         
      
-        if (!this.disableAnimations && !this.disableNiceMeshes && window.objectManager) {
+        if (!this.disableAnimations && window.currentQualityMode === 'quality' && window.objectManager) {
           this.startProfiling('animations');
           this.qualityAnimationTime += 0.01;
           window.objectManager.updateQualityAnimations(this.qualityAnimationTime);
@@ -595,7 +595,7 @@ class RenderManager {
    
       let performanceLevel = 'normal';
       
-      if (this.currentFPS < 30) {
+      if (this.currentFPS < 10) {
         performanceLevel = 'low';
        
         if (!this.lastPerformanceLevel || this.lastPerformanceLevel !== 'low') {
@@ -604,7 +604,7 @@ class RenderManager {
             window.objectManager.setPerformanceMode(true);
           }
         }
-      } else if (this.currentFPS > 55) {
+      } else if (this.currentFPS > 100) {
         performanceLevel = 'high';
         
         if (this.lastPerformanceLevel === 'low') {
@@ -615,7 +615,7 @@ class RenderManager {
         }
       }
       
-      // Remember this for the next frame
+      
       this.lastPerformanceLevel = performanceLevel;
       
     
@@ -777,7 +777,7 @@ class RenderManager {
       const presets = this.getQualityPresets();
       const preset = presets[presetName] || presets.standard;
       
-      
+      // Set current quality mode globally
       window.currentQualityMode = presetName;
       console.log(`Applying quality preset: ${presetName}`);
       
