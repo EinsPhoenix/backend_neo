@@ -8,7 +8,8 @@ class CameraController {
             a: false,
             s: false,
             d: false,
-            SHIFT: false
+            SHIFT: false,
+            f: false,
         };
         
         this.moveSpeed = 5000;
@@ -161,6 +162,49 @@ class CameraController {
         if (event.shiftKey) {
             this.keys.SHIFT = true;
         }
+        
+        // Handle special navigation keys
+        if (key === 'f') {
+            // Focus on selected object
+            if (window.objectManager && window.objectManager.selectedObject) {
+                this.focusOnObject(window.objectManager.selectedObject);
+            }
+        } else if (key === 'from' || key === 'arrowleft') {
+            // Navigate to relationship's start node
+            this.navigateToRelationshipNode('start');
+        } else if (key === 'to' || key === 'arrowright') {
+            // Navigate to relationship's end node
+            this.navigateToRelationshipNode('end');
+        }
+    }
+    
+    focusOnObject(object) {
+        if (!object) return;
+        
+        const targetPosition = object.position.clone();
+        
+   
+        const offset = new THREE.Vector3(0, 20, 500); 
+        const cameraTargetPosition = targetPosition.clone().add(offset);
+        
+       
+        this.moveTo(cameraTargetPosition, targetPosition);
+    }
+    
+    navigateToRelationshipNode(endpoint) {
+        if (!window.objectManager || !window.objectManager.selectedObject) return;
+        
+        const selectedObject = window.objectManager.selectedObject;
+        
+      
+        if (selectedObject.userData.type !== 'relationship') return;
+  
+        const nodeId = endpoint === 'start' ? selectedObject.userData.startId : selectedObject.userData.endId;
+        const node = window.objectManager.nodeObjects.get(nodeId);
+        
+        if (node) {
+            this.focusOnObject(node);
+        }
     }
     
     onKeyUp(event) {
@@ -212,6 +256,10 @@ class CameraController {
         if (this.keys.d) {
             this.camera.position.add(rightVector);
         }
+       
+
+
+    
     }
     
     isControlActive() {
@@ -222,4 +270,58 @@ class CameraController {
         return { x: this.mouseX, y: this.mouseY };
     }
     
+ 
+    moveTo(targetPosition, lookAtPosition, duration = 1000) {
+   
+        const startPosition = this.camera.position.clone();
+        const startDirection = new THREE.Vector3();
+        this.camera.getWorldDirection(startDirection);
+        const startLookAt = startPosition.clone().add(startDirection);
+        const endLookAt = lookAtPosition || targetPosition;
+        
+      
+        const minDistance = 1000;
+        if (lookAtPosition && targetPosition.distanceTo(lookAtPosition) < minDistance) {
+          
+            const direction = new THREE.Vector3().subVectors(targetPosition, lookAtPosition).normalize();
+            targetPosition = lookAtPosition.clone().add(direction.multiplyScalar(minDistance));
+        }
+   
+        const startTime = performance.now();
+        
+     
+        const animate = (currentTime) => {
+            const elapsedTime = currentTime - startTime;
+            const progress = Math.min(elapsedTime / duration, 1.0);
+            
+     
+            const easeProgress = this.easeInOutCubic(progress);
+            
+        
+            this.camera.position.lerpVectors(startPosition, targetPosition, easeProgress);
+            
+         
+            const currentLookAt = new THREE.Vector3().lerpVectors(startLookAt, endLookAt, easeProgress);
+            const direction = new THREE.Vector3().subVectors(currentLookAt, this.camera.position).normalize();
+            
+          
+            this.pitch = Math.asin(direction.y);
+            this.yaw = Math.atan2(direction.x, direction.z);
+            this.updateCameraDirection();
+            
+           
+            if (progress < 1.0) {
+                requestAnimationFrame(animate);
+            }
+        };
+        
+   
+        requestAnimationFrame(animate);
+    }
+
+    easeInOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+
 }

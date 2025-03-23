@@ -1,0 +1,1444 @@
+// object-manager.js
+class ObjectManager {
+    constructor(scene, camera) {
+      this.scene = scene;
+      this.camera = camera;
+      this.nodes = new Map();
+      this.relationships = [];
+      this.nodeObjects = new Map();
+      this.nodeLabels = new Map();
+      this.lineObjects = [];
+      this.lineLabels = [];
+      this.hoveredObject = null;
+      this.selectedObject = null;
+      this.labelColorMap = new Map();
+      this.nextColorIndex = 0;
+      this.infoPanel = document.getElementById('info');
+      this.loadingIndicator = document.getElementById('loading');
+      this.MIN_DISTANCE = 100;
+      this.disableNiceMeshes = false;
+      this.groundLightCircle = null;  
+      this.useLOD = true;  // Default enabling LOD
+      this.frustumCulled = true;  // Enable frustum culling
+      this.instancedNodes = null; // For instanced rendering
+      this.visibleNodes = new Set(); // Track visible nodes
+      this.maxVisibleDistance = 15000; 
+      this.isPerformanceModeEnabled = false;
+  
+      this.neonColors = [
+        0xff00ff, // Magenta
+        0x00ffff, // Cyan
+        0xff0066, // Pink
+        0x00ff00, // Grün
+        0xff3300, // Orange
+        0x9900ff, // Lila
+        0x00ccff, // Hellblau
+        0xffff00, // Gelb
+        0xff0000, // Rot
+        0x0000ff  // Blau
+      ];
+  
+      this.raycaster = new THREE.Raycaster();
+    }
+  
+  
+    setDisableNiceMeshes(value) {
+      this.disableNiceMeshes = value;
+    }
+  
+    setUseLOD(value) {
+      this.useLOD = value;
+      // Update all node meshes if they exist
+      if (this.nodeObjects.size > 0) {
+        this.updateNodeLODs();
+      }
+    }
+  
+    updateNodeLODs() {
+      for (const [id, nodeObject] of this.nodeObjects.entries()) {
+        const nodeData = this.nodes.get(id);
+        if (nodeData) {
+          this.updateNodeLOD(nodeObject, nodeData, this.camera.position);
+        }
+      }
+    }
+  
+    updateNodeLOD(nodeObject, nodeData, cameraPosition) {
+      if (!this.useLOD || !nodeObject) return;
+      
+      const distance = cameraPosition.distanceTo(nodeObject.position);
+      
+      // Base size from connections with a reasonable limit
+      const connections = nodeData.connections || 0;
+      const baseSize = 20 + Math.min(70, connections * 5);
+      
+      // Add hysteresis to LOD transitions to prevent flickering
+      const farThreshold = 10000;
+      const mediumThreshold = 3000;
+      
+      // If currently at far LOD, use different thresholds to prevent oscillation
+      if (nodeObject.userData.currentLOD === 'far' && distance > farThreshold * 0.9) {
+        // Keep far LOD
+      } else if (nodeObject.userData.currentLOD === 'medium' && 
+                distance > mediumThreshold * 0.9 && 
+                distance < farThreshold * 1.1) {
+        // Keep medium LOD
+      } else if (distance > farThreshold) {
+        if (nodeObject.userData.currentLOD !== 'far') {
+          this.applyFarLOD(nodeObject, nodeData, baseSize);
+          nodeObject.userData.currentLOD = 'far';
+        }
+      } else if (distance > mediumThreshold) {
+        if (nodeObject.userData.currentLOD !== 'medium') {
+          this.applyMediumLOD(nodeObject, nodeData, baseSize);
+          nodeObject.userData.currentLOD = 'medium';
+        }
+      } else {
+        if (nodeObject.userData.currentLOD !== 'close') {
+          this.applyCloseLOD(nodeObject, nodeData, baseSize);
+          nodeObject.userData.currentLOD = 'close';
+        }
+      }
+      
+      // Handle visibility based on distance with a buffer to prevent pop-in
+      if (distance > this.maxVisibleDistance * 1.1) {
+        if (nodeObject.visible) {
+          nodeObject.visible = false;
+          this.visibleNodes.delete(nodeData.id);
+        }
+      } else if (distance < this.maxVisibleDistance * 0.9 && !nodeObject.visible) {
+        nodeObject.visible = true;
+        this.visibleNodes.add(nodeData.id);
+      }
+    }
+  
+    applyFarLOD(nodeObject, nodeData, baseSize) {
+      // Properly clean up existing materials and geometries
+      this.cleanupNodeMeshResources(nodeObject);
+      
+      const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
+      const color = this.getColorForLabel(primaryLabel);
+      
+      // Use low-poly geometry for far LOD
+      nodeObject.geometry = new THREE.OctahedronGeometry(baseSize * 0.8, 0);
+      nodeObject.material = new THREE.MeshBasicMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: 0.3,
+        wireframe: this.disableNiceMeshes
+      });
+    }
+  
+    applyMediumLOD(nodeObject, nodeData, baseSize) {
+      // Clear any children
+      while (nodeObject.children.length > 0) {
+        const child = nodeObject.children[0];
+        if (child.material) child.material.dispose();
+        if (child.geometry) child.geometry.dispose();
+        nodeObject.remove(child);
+      }
+      
+      if (nodeObject.geometry) nodeObject.geometry.dispose();
+      if (nodeObject.material) nodeObject.material.dispose();
+      
+      const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
+      const color = this.getColorForLabel(primaryLabel);
+      
+      // Medium detail
+      nodeObject.geometry = new THREE.SphereGeometry(baseSize * 0.8, 16, 12);
+      nodeObject.material = new THREE.MeshStandardMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: 0.5,
+        metalness: 0.8,
+        roughness: 0.7,
+        flatShading: true
+      });
+    }
+  
+    applyCloseLOD(nodeObject, nodeData, baseSize) {
+      // High detail - recreate the original detailed node
+      while (nodeObject.children.length > 0) {
+        const child = nodeObject.children[0];
+        if (child.material) child.material.dispose();
+        if (child.geometry) child.geometry.dispose();
+        nodeObject.remove(child);
+      }
+      
+      if (nodeObject.geometry) nodeObject.geometry.dispose();
+      if (nodeObject.material) nodeObject.material.dispose();
+      
+      const innerSize = baseSize * 0.8;
+      const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
+      const color = this.getColorForLabel(primaryLabel);
+  
+      if (this.disableNiceMeshes) {
+        // Simple high detail version
+        nodeObject.geometry = new THREE.SphereGeometry(baseSize * 0.8, 32, 24);
+        nodeObject.material = new THREE.MeshStandardMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 0.5,
+          metalness: 0.9,
+          roughness: 0.7
+        });
+      } else {
+        // Full detail with outer shell
+        const innerGeometry = new THREE.SphereGeometry(innerSize, 32, 32);
+        const innerMaterial = new THREE.MeshStandardMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 0.5,
+          metalness: 0.9,
+          roughness: 0.7
+        });
+  
+        const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
+        innerMesh.position.set(0, 0, 0);
+        
+        const outerGeometry = new THREE.SphereGeometry(baseSize, 32, 32);
+        const outerMaterial = new THREE.MeshStandardMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 0.5,
+          transparent: true,
+          opacity: 0.5,
+          metalness: 0.9,
+          roughness: 0.7
+        });
+  
+        nodeObject.geometry = outerGeometry;
+        nodeObject.material = outerMaterial;
+        nodeObject.add(innerMesh);
+      }
+    }
+  
+    createTextLabel(text, color = 0xffffff) {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.width = 256;
+      canvas.height = 64;
+      
+      context.fillStyle = 'rgba(0, 0, 0, 0)';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      
+      context.font = 'Bold 24px Arial';
+      context.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      
+      let displayText = text;
+      if (text.length > 20) {
+        displayText = text.slice(0, 18) + '...';
+      }
+      
+      context.fillText(displayText, canvas.width / 2, canvas.height / 2);
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      
+      const spriteMaterial = new THREE.SpriteMaterial({ 
+        map: texture, 
+        transparent: true 
+      });
+      
+      const sprite = new THREE.Sprite(spriteMaterial);
+      sprite.scale.set(200, 50, 1);
+      
+      return sprite;
+    }
+  
+    getColorForLabel(label) {
+      if (this.labelColorMap.has(label)) {
+        return this.labelColorMap.get(label);
+      }
+      
+      let color;
+      
+      if (this.nextColorIndex < this.neonColors.length) {
+        color = this.neonColors[this.nextColorIndex];
+        this.nextColorIndex++;
+      } else {
+        const baseColor = this.neonColors[this.nextColorIndex % this.neonColors.length];
+        
+        const variation = 0.2;
+        const r = ((baseColor >> 16) & 0xff) / 255;
+        const g = ((baseColor >> 8) & 0xff) / 255;
+        const b = (baseColor & 0xff) / 255;
+        
+        const rNew = Math.max(0, Math.min(1, r + (Math.random() * variation * 2 - variation)));
+        const gNew = Math.max(0, Math.min(1, g + (Math.random() * variation * 2 - variation)));
+        const bNew = Math.max(0, Math.min(1, b + (Math.random() * variation * 2 - variation)));
+        
+        color = (Math.floor(rNew * 255) << 16) | 
+                (Math.floor(gNew * 255) << 8) | 
+                Math.floor(bNew * 255);
+        
+        this.nextColorIndex++;
+      }
+      
+      this.labelColorMap.set(label, color);
+      
+      return color;
+    }
+  
+    createNode(id, nodeData) {
+      const size = 20 + Math.min(70, nodeData.connections * 5);
+      
+      // Create a simple placeholder mesh first
+      const geometry = new THREE.SphereGeometry(size * 0.8, 8, 6);
+      const primaryLabel = nodeData.labels[0] || `Node ${id}`;
+      const color = this.getColorForLabel(primaryLabel);
+      
+      const material = new THREE.MeshBasicMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: 0.3
+      });
+      
+      const nodeMesh = new THREE.Mesh(geometry, material);
+      nodeMesh.position.set(
+        nodeData.position.x,
+        nodeData.position.y, 
+        nodeData.position.z
+      );
+      
+      nodeMesh.userData = {
+        id: id,
+        labels: nodeData.labels,
+        properties: nodeData.properties,
+        type: 'node',
+        currentLOD: 'none' 
+      };
+      
+    
+      nodeMesh.frustumCulled = this.frustumCulled;
+      
+      this.scene.add(nodeMesh);
+      this.nodeObjects.set(id, nodeMesh);
+      
+     
+      this.updateNodeLOD(nodeMesh, nodeData, this.camera.position);
+      
+    
+      const labelText = primaryLabel;
+      const labelSprite = this.createTextLabel(labelText, color);
+      labelSprite.position.set(
+        nodeData.position.x,
+        nodeData.position.y + size + 30,
+        nodeData.position.z
+      );
+      
+      labelSprite.frustumCulled = this.frustumCulled;
+      this.scene.add(labelSprite);
+      this.nodeLabels.set(id, labelSprite);
+    }
+  
+    createRelationship(relationship) {
+      const startNode = this.nodeObjects.get(relationship.startId);
+      const endNode = this.nodeObjects.get(relationship.endId);
+      
+      if (!startNode || !endNode) {
+        console.warn('Beziehung mit fehlendem Node:', relationship);
+        return;
+      }
+      
+      const points = [
+        startNode.position.clone(),
+        endNode.position.clone()
+      ];
+      
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      
+      const material = new THREE.LineBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.2
+      });
+      
+      const line = new THREE.Line(geometry, material);
+      
+      line.userData = {
+        id: relationship.id,
+        label: relationship.label,
+        startId: relationship.startId,
+        endId: relationship.endId,
+        type: 'relationship'
+      };
+      
+      // Enable frustum culling
+      line.frustumCulled = this.frustumCulled;
+      
+      this.scene.add(line);
+      this.lineObjects.push(line);
+      
+      const labelText = relationship.label || `Rel ${relationship.id}`;
+      const labelSprite = this.createTextLabel(labelText, 0xffff00); 
+      
+      const midPoint = new THREE.Vector3().addVectors(
+        startNode.position,
+        endNode.position
+      ).multiplyScalar(0.5);
+      
+      midPoint.y += 20;
+      
+      labelSprite.position.copy(midPoint);
+      labelSprite.frustumCulled = this.frustumCulled;
+      
+      this.scene.add(labelSprite);
+      this.lineLabels.push({
+        sprite: labelSprite,
+        startId: relationship.startId,
+        endId: relationship.endId
+      });
+    }
+  
+    addGroundLightCircle(space_size) {
+        if (isNaN(space_size)) {
+            return;
+        }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 1024;
+      const context = canvas.getContext('2d');
+  
+      const gradient = context.createRadialGradient(
+        canvas.width / 2, 
+        canvas.height / 2, 
+        0, 
+        canvas.width / 2, 
+        canvas.height / 2, 
+        canvas.width / 2 
+      );
+  
+      gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');   
+      gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)'); 
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');   
+  
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+  
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+  
+      const material = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        blending: THREE.AdditiveBlending,  
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+  
+      const radius = (space_size-5000) / 2; 
+      const geometry = new THREE.CircleGeometry(radius, 64);
+  
+      const circle = new THREE.Mesh(geometry, material);
+  
+      circle.position.set(0, -space_size/2, 0);
+      circle.rotation.x = -Math.PI / 2; 
+  
+      this.groundLightCircle = circle;  
+      return circle;
+    }
+  
+    updateGroundLightCircle(space_size) {
+      if (this.groundLightCircle && !isNaN(space_size)) {
+        this.groundLightCircle.position.set(0, -space_size/2, 0);
+        
+    
+        const radius = (space_size-5000) / 2;
+        this.groundLightCircle.geometry.dispose(); 
+        this.groundLightCircle.geometry = new THREE.CircleGeometry(radius, 64);
+      }
+    }
+  
+    updateInfoPanel(data) {
+      // Create a container with improved styling
+      let html = `<div style="font-family: 'Segoe UI', Arial, sans-serif; color: #e0e0e0;">`;
+      
+      // Add a header with background color based on data type
+      const headerColor = data.type === 'node' ? '#3498db' : '#e74c3c';
+      const headerIcon = data.type === 'node' ? '●' : '↔';
+      
+      html += `
+        <div style="background-color: ${headerColor}; padding: 8px 12px; border-radius: 4px 4px 0 0; 
+                    margin-bottom: 10px; display: flex; align-items: center;">
+          <span style="font-size: 18px; margin-right: 8px;">${headerIcon}</span>
+          <h3 style="margin: 0; font-weight: bold; text-transform: capitalize;">${data.type}</h3>
+        </div>`;
+      
+      if (data.type === 'node') {
+        // Node information with improved layout
+        const labelList = data.labels.join(', ');
+        
+        // Get connections count from the nodes Map using the node's ID
+        let connectionsCount = 0;
+        if (this.nodes.has(data.id)) {
+          connectionsCount = this.nodes.get(data.id).connections || 0;
+        }
+        
+        html += `
+          <div style="margin-bottom: 12px; background-color: rgba(52, 152, 219, 0.1); border-left: 3px solid #3498db; padding: 8px;">
+            <div style="margin-bottom: 6px;"><strong>Labels:</strong> ${labelList}</div>
+            <div style="margin-bottom: 6px;"><strong>ID:</strong> ${data.id}</div>
+            <div><strong>Relationships:</strong> ${connectionsCount}</div>
+          </div>`;
+        
+        // Properties section with improved styling
+        if (data.properties && Object.keys(data.properties).length > 0) {
+          html += `<div style="background-color: rgba(46, 204, 113, 0.1); border-left: 3px solid #2ecc71; padding: 8px;">
+                    <h4 style="margin-top: 0; margin-bottom: 8px; color: #2ecc71;">Properties</h4>
+                    <table style="width: 100%; border-collapse: collapse;">`;
+                    
+          for (const [key, value] of Object.entries(data.properties)) {
+            html += `<tr>
+                      <td style="padding: 3px; border-bottom: 1px solid rgba(255,255,255,0.1);"><strong>${key}</strong></td>
+                      <td style="padding: 3px; border-bottom: 1px solid rgba(255,255,255,0.1);">${value}</td>
+                    </tr>`;
+          }
+          
+          html += `</table></div>`;
+        }
+      } else if (data.type === 'relationship') {
+        // Relationship information with improved layout
+        html += `
+          <div style="margin-bottom: 12px; background-color: rgba(231, 76, 60, 0.1); border-left: 3px solid #e74c3c; padding: 8px;">
+            <div style="margin-bottom: 6px;"><strong>Type:</strong> ${data.label || 'Undefined'}</div>
+            <div style="margin-bottom: 6px;"><strong>ID:</strong> ${data.id}</div>
+          </div>
+          
+          <div style="display: flex; margin-bottom: 10px;">
+            <div style="flex: 1; background-color: rgba(52, 152, 219, 0.1); border-left: 3px solid #3498db; padding: 8px; cursor: pointer;"
+                 onclick="objectManager.focusOnNode('${data.startId}')" 
+                 onmouseover="this.style.backgroundColor='rgba(52, 152, 219, 0.3)'"
+                 onmouseout="this.style.backgroundColor='rgba(52, 152, 219, 0.1)'">
+              <h4 style="margin-top: 0; margin-bottom: 8px; color: #3498db;">From</h4>
+              <div><strong>ID:</strong> ${data.startId}</div>
+            </div>
+            <div style="width: 20px; display: flex; justify-content: center; align-items: center;">→</div>
+            <div style="flex: 1; background-color: rgba(52, 152, 219, 0.1); border-left: 3px solid #3498db; padding: 8px; cursor: pointer;"
+                 onclick="objectManager.focusOnNode('${data.endId}')"
+                 onmouseover="this.style.backgroundColor='rgba(52, 152, 219, 0.3)'"
+                 onmouseout="this.style.backgroundColor='rgba(52, 152, 219, 0.1)'">
+              <h4 style="margin-top: 0; margin-bottom: 8px; color: #3498db;">To</h4>
+              <div><strong>ID:</strong> ${data.endId}</div>
+            </div>
+          </div>`;
+      }
+      
+      // Close the container div
+      html += `</div>`;
+      
+      // Add the close button with improved styling
+      const closeButton = `
+        <button class="btn" 
+          style="position: absolute; top: 8px; right: 8px; padding: 4px 8px; 
+                font-size: 12px; background-color: rgba(0,0,0,0.4); color: #fff; 
+                border: none; border-radius: 3px; cursor: pointer; transition: background-color 0.2s;"
+          onmouseover="this.style.backgroundColor='rgba(255,0,0,0.4)'"
+          onmouseout="this.style.backgroundColor='rgba(0,0,0,0.4)'"
+          onclick="clearSelection()">✕</button>`;
+      
+      html += closeButton;
+      
+      this.infoPanel.innerHTML = html;
+      
+      // Vertically center the panel
+      this.infoPanel.style.top = "50%";
+      this.infoPanel.style.transform = "translateY(-50%)";
+    }
+  
+    clearSelection() {
+      if (this.selectedObject) {
+        this.resetObjectHighlight(this.selectedObject);
+        this.selectedObject = null;
+      }
+      this.infoPanel.style.display = 'none';
+    }
+  
+    checkHover() {
+
+        if (this.selectedObject) return;
+        
+        const mouse = cameraController.getMouseCoordinates();
+        
+        raycaster.setFromCamera(mouse, camera);
+        
+        
+        const objects = [...this.nodeObjects.values(), ...this.lineObjects];
+        const intersects = raycaster.intersectObjects(objects);
+        
+        if (intersects.length > 0) {
+        const object = intersects[0].object;
+        
+        if (this.hoveredObject !== object) {
+          
+            if (this.hoveredObject) {
+                if (this.hoveredObject.userData.type === 'node') {
+                    this.hoveredObject.material.emissiveIntensity = 0.7;
+                    this.hoveredObject.scale.set(1, 1, 1);
+                } else {
+                    this.hoveredObject.material.opacity = 0.6;
+                }
+            }
+        
+            if (object.userData.type === 'node') {
+                object.material.emissiveIntensity = 1.5;
+                object.scale.set(1.1, 1.1, 1.1);
+            } else {
+                object.material.opacity = 1.0;
+            }
+            
+            this.updateInfoPanel(object.userData);
+            
+            this.hoveredObject = object;
+        }
+        
+        this.infoPanel.style.display = 'block';
+        } else {
+        
+        if (this.hoveredObject) {
+            if (this.hoveredObject.userData.type === 'node') {
+                this.hoveredObject.material.emissiveIntensity = 0.7;
+                this.hoveredObject.scale.set(1, 1, 1);
+            } else {
+                this.hoveredObject.material.opacity = 0.6;
+            }
+            
+            this.hoveredObject = null;
+            this.infoPanel.style.display = 'none';
+        }
+        }
+        }
+  
+    handleClick(mouseCoordinates) {
+      this.raycaster.setFromCamera(mouseCoordinates, this.camera);
+  
+      const objects = [...this.nodeObjects.values(), ...this.lineObjects];
+      const intersects = this.raycaster.intersectObjects(objects);
+  
+      if (intersects.length > 0) {
+        const object = intersects[0].object;
+        
+        // First reset the previous selection
+        if (this.selectedObject && this.selectedObject !== object) {
+          this.resetObjectHighlight(this.selectedObject);
+        }
+  
+        this.selectedObject = object;
+  
+        if (object.userData.type === 'node') {
+          this.highlightNode(object);
+        } else {
+          this.highlightRelationship(object);
+        }
+  
+        // Reset any hover that isn't the selected object
+        if (this.hoveredObject && this.hoveredObject !== this.selectedObject) {
+          this.resetObjectHighlight(this.hoveredObject);
+          this.hoveredObject = null;
+        }
+  
+        this.updateInfoPanel(object.userData);
+        this.infoPanel.style.display = 'block';
+      } else {
+        if (this.selectedObject) {
+          this.resetObjectHighlight(this.selectedObject);
+          this.selectedObject = null;
+        }
+        this.infoPanel.style.display = 'none';
+      }
+    }
+  
+    highlightNode(node) {
+      if (!node || !node.material) return;
+      
+      const originalColor = node.userData.originalColor || node.material.color.getHex();
+      node.userData.originalColor = originalColor;
+      node.userData.originalEmissive = node.material.emissive ? node.material.emissive.getHex() : 0xffffff;
+      node.userData.originalEmissiveIntensity = node.material.emissiveIntensity || 0.5;
+      
+      // Store original materials if we have children (for complex nodes)
+      if (node.children && node.children.length > 0) {
+        node.userData.childrenOriginalMaterials = [];
+        node.children.forEach((child, index) => {
+          if (child.material) {
+            node.userData.childrenOriginalMaterials[index] = {
+              emissive: child.material.emissive ? child.material.emissive.getHex() : 0xffffff,
+              emissiveIntensity: child.material.emissiveIntensity || 0.5
+            };
+            child.material.emissiveIntensity = 1.5;
+          }
+        });
+      }
+      
+      // Apply highlight effect
+      if (node.material.emissive) {
+        node.material.emissive.setHex(0xffffff);
+        node.material.emissiveIntensity = 1.5;
+      }
+    }
+  
+    highlightRelationship(line) {
+      if (!line || !line.material) return;
+      
+      line.userData.originalColor = line.material.color.getHex();
+      line.userData.originalOpacity = line.material.opacity;
+      
+      line.material.color.setHex(0xffffff);
+      line.material.opacity = 0.8;
+    }
+  
+    resetObjectHighlight(object) {
+      if (!object || !object.material) return;
+      
+      if (object.userData.type === 'node') {
+        if (object.material.emissive && object.userData.originalEmissive !== undefined) {
+          object.material.emissive.setHex(object.userData.originalEmissive);
+        }
+        if (object.userData.originalEmissiveIntensity !== undefined) {
+          object.material.emissiveIntensity = object.userData.originalEmissiveIntensity;
+        }
+        
+        // Restore children materials if any
+        if (object.userData.childrenOriginalMaterials && object.children) {
+          object.children.forEach((child, index) => {
+            const originalMaterial = object.userData.childrenOriginalMaterials[index];
+            if (child.material && originalMaterial) {
+              if (child.material.emissive && originalMaterial.emissive !== undefined) {
+                child.material.emissive.setHex(originalMaterial.emissive);
+              }
+              if (originalMaterial.emissiveIntensity !== undefined) {
+                child.material.emissiveIntensity = originalMaterial.emissiveIntensity;
+              }
+            }
+          });
+        }
+      } else if (object.userData.type === 'relationship') {
+        if (object.userData.originalColor !== undefined) {
+          object.material.color.setHex(object.userData.originalColor);
+        }
+        if (object.userData.originalOpacity !== undefined) {
+          object.material.opacity = object.userData.originalOpacity;
+        }
+      }
+    }
+  
+    updateLabels() {
+      // Update LODs if enabled
+      if (this.useLOD) {
+        for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+          const nodeData = this.nodes.get(nodeId);
+          if (nodeData) {
+            this.updateNodeLOD(nodeObject, nodeData, this.camera.position);
+          }
+        }
+      }
+    
+      // Original label update code
+      for (const [nodeId, label] of this.nodeLabels.entries()) {
+        const node = this.nodeObjects.get(nodeId);
+        if (node && node.visible) {
+          label.lookAt(this.camera.position);
+          
+          const distance = this.camera.position.distanceTo(node.position);
+          
+          let scale = 1;
+          
+          if (distance > 5000) {
+            scale = 1;
+          } else if (distance > 2500) {
+            const progress = (5000 - distance) / 2500; 
+            scale = 0.1 + (5 * progress); 
+          } else if (distance > 100) {
+            const progress = (2500 - distance) / 2000; 
+            scale = 5 - (4 * progress); 
+          } else {
+            scale = 1;
+          }
+          
+          label.scale.set(200 * scale, 50 * scale, 1);
+          
+         
+          label.visible = distance <= this.maxVisibleDistance;
+        } else if (node && !node.visible) {
+          label.visible = false;
+        }
+      }
+      
+      // Relationship labels update
+      for (const labelInfo of this.lineLabels) {
+        const startNode = this.nodeObjects.get(labelInfo.startId);
+        const endNode = this.nodeObjects.get(labelInfo.endId);
+    
+        if (startNode && endNode && startNode.visible && endNode.visible) {
+          const midPoint = new THREE.Vector3().addVectors(
+            startNode.position,
+            endNode.position
+          ).multiplyScalar(0.5);
+          
+          midPoint.y += 20;
+          
+          labelInfo.sprite.position.copy(midPoint);
+          labelInfo.sprite.lookAt(this.camera.position);
+          
+          const distance = this.camera.position.distanceTo(midPoint);
+          
+          let scale = 1; 
+          
+          if (distance > 5000) {
+            scale = 1;
+          } else if (distance > 2500) {
+            const progress = (5000 - distance) / 2500; 
+            scale = 0.1 + (2 * progress); 
+          } else if (distance > 100) {
+            const progress = (2500 - distance) / 2000; 
+            scale = 2 - (1 * progress); 
+          } else {
+            scale = 1;
+          }
+          
+          labelInfo.sprite.scale.set(200 * scale, 50 * scale, 1);
+          labelInfo.sprite.visible = distance <= this.maxVisibleDistance;
+        } else {
+          labelInfo.sprite.visible = false;
+        }
+      }
+    }
+  
+    setupInstancedRendering() {
+      
+      if (this.instancedNodes) {
+        this.scene.remove(this.instancedNodes);
+        this.instancedNodes.geometry.dispose();
+        this.instancedNodes.material.dispose();
+        this.instancedNodes = null;
+      }
+      
+     
+      if (this.nodeObjects.size === 0 || !this.disableNiceMeshes) {
+        return;
+      }
+      
+      const nodeCount = this.nodeObjects.size;
+      
+      // Create instanced mesh
+      const geometry = new THREE.SphereGeometry(30, 8, 6);
+      const material = new THREE.MeshBasicMaterial();
+      
+      const instancedMesh = new THREE.InstancedMesh(
+        geometry,
+        material,
+        nodeCount
+      );
+      
+      let index = 0;
+      const tempMatrix = new THREE.Matrix4();
+      const tempColor = new THREE.Color();
+      
+      // Set position and color for each instance
+      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+        const nodeData = this.nodes.get(nodeId);
+        if (nodeData) {
+          const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
+          const color = this.getColorForLabel(primaryLabel);
+          
+          tempMatrix.setPosition(
+            nodeData.position.x,
+            nodeData.position.y,
+            nodeData.position.z
+          );
+          
+          tempColor.set(color);
+          
+          instancedMesh.setMatrixAt(index, tempMatrix);
+          instancedMesh.setColorAt(index, tempColor);
+          
+          index++;
+        }
+      }
+      
+      instancedMesh.instanceMatrix.needsUpdate = true;
+      if (instancedMesh.instanceColor) {
+        instancedMesh.instanceColor.needsUpdate = true;
+      }
+      
+      this.instancedNodes = instancedMesh;
+      this.scene.add(instancedMesh);
+    }
+  
+    setPerformanceMode(enabled) {
+        console.log('setPerformanceMode', enabled);
+      if (enabled & !this.isPerformanceModeEnabled) {
+        
+        this.setupInstancedRendering();
+        
+     
+        for (const nodeObject of this.nodeObjects.values()) {
+          nodeObject.visible = false;
+        }
+        
+      
+        if (this.instancedNodes) {
+          this.instancedNodes.visible = true;
+        }
+        
+        this.maxVisibleDistance = 15000;
+
+        this.isPerformanceModeEnabled = true;
+      } else if (!enabled && this.isPerformanceModeEnabled) {
+      
+        if (this.instancedNodes) {
+          this.instancedNodes.visible = false;
+        }
+        
+        for (const nodeObject of this.nodeObjects.values()) {
+          nodeObject.visible = true;
+        }
+
+        this.maxVisibleDistance = 50000;
+        this.isPerformanceModeEnabled = false;
+      }
+    }
+  
+    createVisualization(nodes, relationships) {
+      this.nodes = nodes;
+      this.relationships = relationships;
+      
+      const batchSize = 50;
+      let nodeCount = nodes.size;
+      let processedCount = 0;
+      const loadingIndicator = this.loadingIndicator;
+      
+      const createNodesInBatches = () => {
+        const nodesToProcess = Array.from(nodes.entries())
+          .slice(processedCount, processedCount + batchSize);
+        
+        nodesToProcess.forEach(([id, nodeData]) => {
+          this.createNode(id, nodeData);
+          processedCount++;
+        });
+        
+        loadingIndicator.textContent = `Lade Nodes: ${processedCount}/${nodeCount}`;
+        
+        if (processedCount < nodeCount) {
+          setTimeout(createNodesInBatches, 10);
+        } else {
+          createRelationshipsInBatches();
+        }
+      };
+    
+      const createRelationshipsInBatches = () => {
+        const totalRelationships = relationships.length;
+        let processedRelationships = 0;
+        
+        const processBatch = () => {
+          const batchSize = 50;
+          const relToProcess = relationships.slice(
+            processedRelationships, 
+            processedRelationships + batchSize
+          );
+          
+          relToProcess.forEach(rel => {
+            this.createRelationship(rel);
+            processedRelationships++;
+          });
+          
+          loadingIndicator.textContent = `Lade Beziehungen: ${processedRelationships}/${totalRelationships}`;
+          
+          if (processedRelationships < totalRelationships) {
+            setTimeout(processBatch, 10);
+          } else {
+            loadingIndicator.textContent = `Visualisierung komplett: ${nodeCount} Nodes, ${totalRelationships} Beziehungen`;
+            setTimeout(() => {
+              loadingIndicator.style.opacity = '0.5';
+            }, 3000);
+          }
+        };
+        
+        processBatch();
+      };
+      
+      createNodesInBatches();
+    }
+
+    setDynamicRendering(enabled) {
+      this.dynamicRendering = enabled;
+      
+      if (enabled) {
+        this.updateDynamicNodeVisibility();
+      } else {
+       
+        for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+          nodeObject.visible = true;
+          const label = this.nodeLabels.get(nodeId);
+          if (label) label.visible = true;
+        }
+      }
+    }
+    
+    updateDynamicNodeVisibility() {
+      if (!this.dynamicRendering) return;
+      
+    
+      if (!this._frustum) {
+        this._frustum = new THREE.Frustum();
+        this._projScreenMatrix = new THREE.Matrix4();
+      }
+      
+      this._projScreenMatrix.multiplyMatrices(
+        this.camera.projectionMatrix,
+        this.camera.matrixWorldInverse
+      );
+      this._frustum.setFromProjectionMatrix(this._projScreenMatrix);
+      
+     
+      const visibleNodes = new Set();
+      const nodesToUpdate = [];
+      const labelsToUpdate = [];
+      
+     
+      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+        const isInFrustum = this._frustum.containsPoint(nodeObject.position);
+        const distance = this.camera.position.distanceTo(nodeObject.position);
+        const isVisible = isInFrustum && distance <= this.maxVisibleDistance;
+        
+        if (isVisible !== nodeObject.visible) {
+          nodesToUpdate.push({ node: nodeObject, visible: isVisible });
+        }
+        
+        if (isVisible) {
+          visibleNodes.add(nodeId);
+        }
+      }
+      
+    
+      for (const update of nodesToUpdate) {
+        update.node.visible = update.visible;
+      }
+      
+     
+      for (const [nodeId, label] of this.nodeLabels.entries()) {
+        const isVisible = visibleNodes.has(nodeId);
+        if (label.visible !== isVisible) {
+          labelsToUpdate.push({ label, visible: isVisible });
+        }
+      }
+      
+      for (const update of labelsToUpdate) {
+        update.label.visible = update.visible;
+      }
+      
+
+      this.updateRelationshipVisibility(visibleNodes);
+    }
+    
+    updateRelationshipVisibility(visibleNodes) {
+      const linesToUpdate = [];
+      
+      for (let i = 0; i < this.lineObjects.length; i++) {
+        const line = this.lineObjects[i];
+        const startNodeId = line.userData.startId;
+        const endNodeId = line.userData.endId;
+        
+        const eitherNodeVisible = visibleNodes.has(startNodeId) || visibleNodes.has(endNodeId);
+        
+        if (line.visible !== eitherNodeVisible) {
+          linesToUpdate.push({ line, visible: eitherNodeVisible, index: i });
+        }
+      }
+      
+   
+      for (const update of linesToUpdate) {
+        update.line.visible = update.visible;
+        
+        if (update.index < this.lineLabels.length) {
+          this.lineLabels[update.index].sprite.visible = update.visible;
+        }
+      }
+    }
+
+    // Add edge bundling methods to the ObjectManager class
+
+    applyEdgeBundling(strength = 0.5) {
+      this.edgeBundlingEnabled = true;
+      this.edgeBundlingStrength = strength;
+      
+    
+      const edgeGroups = new Map();
+      
+    
+      for (const line of this.lineObjects) {
+        const startId = line.userData.startId;
+        const endId = line.userData.endId;
+    
+        const key1 = `${startId}-${endId}`;
+        const key2 = `${endId}-${startId}`;
+        
+        if (!edgeGroups.has(key1) && !edgeGroups.has(key2)) {
+          edgeGroups.set(key1, []);
+        }
+        
+        const groupKey = edgeGroups.has(key1) ? key1 : key2;
+        edgeGroups.get(groupKey).push(line);
+      }
+      
+ 
+      for (const [key, edges] of edgeGroups.entries()) {
+        if (edges.length <= 1) continue; 
+        
+        this.bundleEdgeGroup(edges, strength);
+      }
+    }
+    
+    bundleEdgeGroup(edges, strength) {
+      if (edges.length <= 1) return;
+      
+  
+      const firstEdge = edges[0];
+      const startNode = this.nodeObjects.get(firstEdge.userData.startId);
+      const endNode = this.nodeObjects.get(firstEdge.userData.endId);
+      
+      if (!startNode || !endNode) return;
+      
+   
+      const midPoint = new THREE.Vector3().addVectors(
+        startNode.position,
+        endNode.position
+      ).multiplyScalar(0.5);
+      
+    
+      const direction = new THREE.Vector3().subVectors(
+        endNode.position,
+        startNode.position
+      ).normalize();
+      
+     
+      const perpVector1 = new THREE.Vector3(-direction.y, direction.x, 0).normalize();
+      const perpVector2 = new THREE.Vector3().crossVectors(direction, perpVector1).normalize();
+      
+      const radius = Math.min(edges.length * 5, 50); 
+      const angleStep = (2 * Math.PI) / edges.length;
+      
+      for (let i = 0; i < edges.length; i++) {
+        const edge = edges[i];
+        const angle = i * angleStep;
+        
+
+        const offset = perpVector1.clone().multiplyScalar(Math.cos(angle) * radius)
+          .add(perpVector2.clone().multiplyScalar(Math.sin(angle) * radius));
+        
+   
+        this.updateEdgeGeometry(edge, startNode.position, endNode.position, midPoint.clone().add(offset), strength);
+      }
+    }
+    
+    updateEdgeGeometry(line, startPoint, endPoint, controlPoint, strength) {
+      if (line.geometry) {
+        line.geometry.dispose();
+      }
+      
+    
+      const curve = new THREE.QuadraticBezierCurve3(
+        startPoint.clone(),
+        controlPoint,
+        endPoint.clone()
+      );
+     
+      const points = curve.getPoints(20);
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      
+      line.geometry = geometry;
+    
+      for (const labelInfo of this.lineLabels) {
+        if (labelInfo.startId === line.userData.startId && 
+            labelInfo.endId === line.userData.endId) {
+         
+          labelInfo.sprite.position.copy(controlPoint.clone().add(new THREE.Vector3(0, 20, 0)));
+          break;
+        }
+      }
+    }
+    
+    toggleEdgeBundling(enabled, strength = 0.5) {
+      if (enabled) {
+        this.applyEdgeBundling(strength);
+      } else {
+        this.resetEdgeBundling();
+      }
+    }
+    
+    resetEdgeBundling() {
+      this.edgeBundlingEnabled = false;
+      
+  
+      for (const line of this.lineObjects) {
+        const startNode = this.nodeObjects.get(line.userData.startId);
+        const endNode = this.nodeObjects.get(line.userData.endId);
+        
+        if (startNode && endNode) {
+          if (line.geometry) {
+            line.geometry.dispose();
+          }
+          
+          const points = [startNode.position, endNode.position];
+          line.geometry = new THREE.BufferGeometry().setFromPoints(points);
+        }
+      }
+      
+    
+      for (const labelInfo of this.lineLabels) {
+        const startNode = this.nodeObjects.get(labelInfo.startId);
+        const endNode = this.nodeObjects.get(labelInfo.endId);
+        
+        if (startNode && endNode) {
+          const midPoint = new THREE.Vector3().addVectors(
+            startNode.position, 
+            endNode.position
+          ).multiplyScalar(0.5);
+          
+          midPoint.y += 20;
+          labelInfo.sprite.position.copy(midPoint);
+        }
+      }
+    }
+
+    getPerformanceIsEnabled() {
+      return this.isPerformanceModeEnabled;
+    }
+
+    applyQualityMaterials(envMap) {
+      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+        const nodeData = this.nodes.get(nodeId);
+        if (!nodeData) continue;
+        
+        const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
+        const color = this.getColorForLabel(primaryLabel);
+        
+    
+        if (nodeObject.material) {
+          nodeObject.material.dispose();
+        }
+
+        const material = new THREE.MeshPhysicalMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 0.3,
+          metalness: 0.8,
+          roughness: 0.2,
+          envMap: envMap,
+          envMapIntensity: 1.0,
+          clearcoat: 0.5,
+          clearcoatRoughness: 0.3,
+          reflectivity: 1.0
+        });
+        
+        nodeObject.material = material;
+        
+   
+        if (!nodeObject.userData.glowMesh) {
+          const glowGeometry = new THREE.SphereGeometry(
+            nodeObject.geometry.parameters?.radius * 1.2 || 30, 
+            32, 
+            32
+          );
+          
+          const glowMaterial = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.2,
+            side: THREE.BackSide
+          });
+          
+          const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+          nodeObject.add(glowMesh);
+          nodeObject.userData.glowMesh = glowMesh;
+        } else {
+          nodeObject.userData.glowMesh.visible = true;
+        }
+        
+      
+        this.updateNodeLOD(nodeObject, nodeData, this.camera.position);
+      }
+    }
+    
+    applyStandardMaterials() {
+      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+        const nodeData = this.nodes.get(nodeId);
+        if (!nodeData) continue;
+        
+        const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
+        const color = this.getColorForLabel(primaryLabel);
+        
+       
+        if (nodeObject.userData.glowMesh) {
+          nodeObject.userData.glowMesh.visible = false;
+        }
+        
+   
+        this.updateNodeLOD(nodeObject, nodeData, this.camera.position);
+      }
+    }
+    
+    applyPerformanceMaterials() {
+      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+      
+        if (nodeObject.userData.glowMesh) {
+          nodeObject.userData.glowMesh.visible = false;
+        }
+        
+      
+      }
+    }
+    
+    updateQualityAnimations(time) {
+     
+      for (const nodeObject of this.nodeObjects.values()) {
+        if (nodeObject.userData.glowMesh && nodeObject.userData.glowMesh.visible) {
+          const pulse = Math.sin(time * 2) * 0.1 + 0.9; 
+          
+          nodeObject.userData.glowMesh.scale.set(pulse, pulse, pulse);
+          
+          
+          nodeObject.userData.glowMesh.material.opacity = 0.1 + Math.sin(time * 3) * 0.05;
+        }
+      }
+      
+    
+      if (this.edgeGlowEnabled) {
+        for (const line of this.lineObjects) {
+          if (line.userData.glowLine) {
+            const glow = line.userData.glowLine;
+            glow.material.opacity = 0.3 + Math.sin(time * 2 + line.userData.id % 10) * 0.1;
+          }
+        }
+      }
+    }
+    
+    enableEdgeGlow(enabled) {
+      this.edgeGlowEnabled = enabled;
+      
+      for (const line of this.lineObjects) {
+        if (enabled) {
+          if (!line.userData.glowLine) {
+          
+            const startNode = this.nodeObjects.get(line.userData.startId);
+            const endNode = this.nodeObjects.get(line.userData.endId);
+            
+            if (!startNode || !endNode) continue;
+            
+         
+            const points = line.geometry.attributes.position;
+            const glowGeometry = new THREE.BufferGeometry().setFromPoints(
+              Array(points.count).fill().map((_, i) => 
+                new THREE.Vector3(
+                  points.getX(i), 
+                  points.getY(i), 
+                  points.getZ(i)
+                )
+              )
+            );
+            
+      
+            const relationshipColor = 0x00ffff;
+            
+            const glowMaterial = new THREE.LineBasicMaterial({
+              color: relationshipColor,
+              transparent: true,
+              opacity: 0.3,
+              linewidth: 3
+            });
+            
+            const glowLine = new THREE.Line(glowGeometry, glowMaterial);
+            this.scene.add(glowLine);
+            
+            line.userData.glowLine = glowLine;
+          } else {
+            line.userData.glowLine.visible = true;
+          }
+        } else if (line.userData.glowLine) {
+          line.userData.glowLine.visible = false;
+        }
+      }
+    }
+    
+    focusOnNode(nodeId) {
+      const nodeObject = this.nodeObjects.get(nodeId);
+      if (nodeObject) {
+        this.focusOnObject(nodeObject);
+      }
+    }
+    
+   
+    focusOnObject(object) {
+        if (!object) return;
+        
+
+        const targetPosition = object.position.clone();
+        
+      
+        const offset = new THREE.Vector3(0, 20, 100);
+        const cameraTargetPosition = targetPosition.clone().add(offset);
+        
+       
+        if (window.cameraController) {
+            window.cameraController.moveTo(cameraTargetPosition, targetPosition, 1000); 
+        }
+    }
+    
+    // Add this method to handle keypress navigation
+    handleKeyNavigation(key) {
+       
+        if (key === 'f' || key === 'F') {
+            if (this.selectedObject) {
+                this.focusOnObject(this.selectedObject);
+            }
+        } else if (key === 'from' || key === 'arrowleft') {
+            if (this.selectedObject && this.selectedObject.userData.type === 'relationship') {
+                const startNode = this.nodeObjects.get(this.selectedObject.userData.startId);
+                if (startNode) {
+                    this.focusOnObject(startNode);
+                }
+            }
+        } else if (key === 'to' || key === 'arrowright') {
+            if (this.selectedObject && this.selectedObject.userData.type === 'relationship') {
+                const endNode = this.nodeObjects.get(this.selectedObject.userData.endId);
+                if (endNode) {
+                    this.focusOnObject(endNode);
+                }
+            }
+        }
+    }
+
+    cleanupNodeMeshResources(nodeObject) {
+   
+      while (nodeObject.children.length > 0) {
+        const child = nodeObject.children[0];
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat && mat.dispose) mat.dispose();
+            });
+          } else if (child.material.dispose) {
+            child.material.dispose();
+          }
+        }
+        if (child.geometry && child.geometry.dispose) child.geometry.dispose();
+        nodeObject.remove(child);
+      }
+      
+    
+      if (nodeObject.geometry && nodeObject.geometry.dispose) nodeObject.geometry.dispose();
+      if (nodeObject.material) {
+        if (Array.isArray(nodeObject.material)) {
+          nodeObject.material.forEach(mat => {
+            if (mat && mat.dispose) mat.dispose();
+          });
+        } else if (nodeObject.material.dispose) {
+          nodeObject.material.dispose();
+        }
+      }
+    }
+  }
+
