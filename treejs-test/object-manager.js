@@ -87,11 +87,11 @@ class ObjectManager {
       
       
       if (nodeObject.userData.currentLOD === 'far' && distance > farThreshold * 0.9) {
-        // Keep far LOD
+      
       } else if (nodeObject.userData.currentLOD === 'medium' && 
                  distance > mediumThreshold * 0.9 && 
                  distance < farThreshold * 1.1) {
-        // Keep medium LOD
+     
       } else {
         // Decide LOD based on distance
         if (distance > farThreshold) {
@@ -149,7 +149,7 @@ class ObjectManager {
        
         nodeObject.geometry = new THREE.TetrahedronGeometry(baseSize * 0.8, 0);
         
-        // Use basic material with no reflections or special effects
+      
         nodeObject.material = new THREE.MeshBasicMaterial({
           color: color,
           flatShading: true
@@ -161,9 +161,9 @@ class ObjectManager {
       
       nodeObject.geometry = new THREE.OctahedronGeometry(baseSize * 0.8, 0);
       
-      // Apply material based on quality mode
+     
       if (isQualityMode) {
-        // Apply high quality material for far LOD
+        
         nodeObject.material = new THREE.MeshPhysicalMaterial({
           color: color,
           emissive: color,
@@ -177,7 +177,7 @@ class ObjectManager {
           reflectivity: 0.5
         });
         
-        // Simple glow effect for far distance
+        
         const glowGeometry = new THREE.SphereGeometry(baseSize * 1.2, 8, 6);
         const glowMaterial = new THREE.MeshBasicMaterial({
           color: color,
@@ -189,10 +189,10 @@ class ObjectManager {
         const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
         nodeObject.add(glowMesh);
         
-        // Store for cleanup
+     
         nodeObject.userData.atmosphereLayers = [glowMesh];
       } else {
-        // Use standard material for non-quality mode
+       
         nodeObject.material = new THREE.MeshStandardMaterial({
           color: color,
           emissive: color,
@@ -204,16 +204,16 @@ class ObjectManager {
     }
   
     applyMediumLOD(nodeObject, nodeData, baseSize, isQualityMode) {
-      // Clean up existing resources
+      
       this.cleanupNodeMeshResources(nodeObject);
       
       const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
       const color = this.getColorForLabel(primaryLabel);
       
-      // Medium detail geometry
+     
       nodeObject.geometry = new THREE.SphereGeometry(baseSize * 0.8, 16, 12);
       
-      // Get envMap safely
+      
       const envMap = window.renderManager ? window.renderManager.envMap : null;
 
       if (window.currentQualityMode === 'performance') {
@@ -611,7 +611,7 @@ class ObjectManager {
     }
     
     generateCloudTexture() {
-      // Use cached textures when possible
+      
       const cacheKey = 'cloudTexture';
       
       if (window.renderManager && window.renderManager.textureCache && 
@@ -619,18 +619,18 @@ class ObjectManager {
         return window.renderManager.textureCache.get(cacheKey);
       }
       
-      // Create a procedural cloud texture
+     
       const size = 512;
       const canvas = document.createElement('canvas');
       canvas.width = size;
       canvas.height = size;
       const ctx = canvas.getContext('2d');
       
-      // Fill with black (no displacement)
+      
       ctx.fillStyle = 'black';
       ctx.fillRect(0, 0, size, size);
       
-      // Generate cloudy patterns using multiple overlapping gradients
+     
       for (let i = 0; i < 40; i++) {
         const x = Math.random() * size;
         const y = Math.random() * size;
@@ -645,12 +645,12 @@ class ObjectManager {
         ctx.fillRect(0, 0, size, size);
       }
       
-      // Create texture from canvas
+    
       const texture = new THREE.CanvasTexture(canvas);
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.RepeatWrapping;
       
-      // Cache the texture
+    
       if (window.renderManager && window.renderManager.textureCache) {
         window.renderManager.textureCache.set(cacheKey, texture);
       }
@@ -660,7 +660,7 @@ class ObjectManager {
     
     updateQualityAnimations(time) {
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
-        // Animate atmosphere layers
+        
         if (nodeObject.userData.atmosphereLayers) {
           nodeObject.userData.atmosphereLayers.forEach(layer => {
             if (layer.userData && layer.userData.animate) {
@@ -686,33 +686,89 @@ class ObjectManager {
       canvas.width = 256;
       canvas.height = 64;
       
-      context.fillStyle = 'rgba(0, 0, 0, 0)';
-      context.fillRect(0, 0, canvas.width, canvas.height);
+     
+      const r = (color >> 16) & 0xff;
+      const g = (color >> 8) & 0xff;
+      const b = color & 0xff;
+      const colorString = `rgb(${r}, ${g}, ${b})`;
       
-      context.font = 'Bold 24px Arial';
-      context.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
-      context.textAlign = 'center';
-      context.textBaseline = 'middle';
+      // Clear canvas with transparency
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      
+     
+      const padding = 8;
+      const borderRadius = 12;
+      const borderWidth = 2;
       
       let displayText = text;
       if (text.length > 20) {
         displayText = text.slice(0, 18) + '...';
       }
       
+     
+      context.font = 'Bold 20px Arial';
+      const textMetrics = context.measureText(displayText);
+      const textWidth = textMetrics.width;
+      
+
+      const bgWidth = textWidth + (padding * 2);
+      const bgHeight = 28;
+      
+ 
+      const bgX = (canvas.width - bgWidth) / 2;
+      const bgY = (canvas.height - bgHeight) / 2;
+      
+     
+      context.fillStyle = colorString;
+      this.roundRect(context, bgX, bgY, bgWidth, bgHeight, borderRadius);
+      
+    
+      context.fillStyle = 'white';
+      this.roundRect(
+        context, 
+        bgX + borderWidth, 
+        bgY + borderWidth, 
+        bgWidth - (borderWidth * 2), 
+        bgHeight - (borderWidth * 2), 
+        borderRadius - borderWidth
+      );
+      
+
+      context.font = 'Bold 20px Arial';
+      context.fillStyle = `rgb(40, 40, 40)`;  
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
       context.fillText(displayText, canvas.width / 2, canvas.height / 2);
       
+    
       const texture = new THREE.CanvasTexture(canvas);
       texture.needsUpdate = true;
       
       const spriteMaterial = new THREE.SpriteMaterial({ 
         map: texture, 
-        transparent: true 
+        transparent: true,
+        sizeAttenuation: true
       });
       
       const sprite = new THREE.Sprite(spriteMaterial);
       sprite.scale.set(200, 50, 1);
       
       return sprite;
+    }
+    
+    
+    roundRect(ctx, x, y, width, height, radius) {
+      if (width < 2 * radius) radius = width / 2;
+      if (height < 2 * radius) radius = height / 2;
+      
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.arcTo(x + width, y, x + width, y + height, radius);
+      ctx.arcTo(x + width, y + height, x, y + height, radius);
+      ctx.arcTo(x, y + height, x, y, radius);
+      ctx.arcTo(x, y, x + width, y, radius);
+      ctx.closePath();
+      ctx.fill();
     }
   
     getColorForLabel(label) {
@@ -752,15 +808,15 @@ class ObjectManager {
     createNode(id, nodeData) {
       const size = 20 + Math.min(70, nodeData.connections * 5);
       
-      // Create a simple placeholder mesh first
+   
       const geometry = new THREE.SphereGeometry(size * 0.8, 8, 6);
       const primaryLabel = nodeData.labels[0] || `Node ${id}`;
       const color = this.getColorForLabel(primaryLabel);
       
-      // Check quality mode BEFORE creating initial material
-      const isQualityMode = window.renderManager && window.renderManager.currentQualityMode === 'quality';
       
-      // Use different initial material based on quality mode
+      const isQualityMode = window.renderManager && window.currentQualityMode === 'quality';
+      
+     
       const material = isQualityMode ? 
         new THREE.MeshPhysicalMaterial({
           color: color,
@@ -793,7 +849,7 @@ class ObjectManager {
         properties: nodeData.properties,
         type: 'node',
         currentLOD: 'none',
-        qualityApplied: isQualityMode // Track quality application from the start
+        qualityApplied: isQualityMode 
       };
       
       nodeMesh.frustumCulled = this.frustumCulled;
@@ -801,10 +857,9 @@ class ObjectManager {
       this.scene.add(nodeMesh);
       this.nodeObjects.set(id, nodeMesh);
       
-      // Now update LOD after basic setup is complete
-      this.updateNodeLOD(nodeMesh, nodeData, this.camera.position, true); // Force quality check
+      this.updateNodeLOD(nodeMesh, nodeData, this.camera.position, true); 
       
-      // If in quality mode, explicitly apply quality effects now
+      
       if (isQualityMode) {
         this.applyNodeQualityEffects(nodeMesh, nodeData);
       }
@@ -942,10 +997,10 @@ class ObjectManager {
     }
   
     updateInfoPanel(data) {
-      // Create a container with improved styling
+
       let html = `<div style="font-family: 'Segoe UI', Arial, sans-serif; color: #e0e0e0;">`;
       
-      // Add a header with background color based on data type
+    
       const headerColor = data.type === 'node' ? '#3498db' : '#e74c3c';
       const headerIcon = data.type === 'node' ? '●' : '↔';
       
@@ -957,7 +1012,7 @@ class ObjectManager {
         </div>`;
       
       if (data.type === 'node') {
-        // Node information with improved layout
+       
         const labelList = data.labels.join(', ');
         
         // Get connections count from the nodes Map using the node's ID
@@ -973,7 +1028,7 @@ class ObjectManager {
             <div><strong>Relationships:</strong> ${connectionsCount}</div>
           </div>`;
         
-        // Properties section with improved styling
+     
         if (data.properties && Object.keys(data.properties).length > 0) {
           html += `<div style="background-color: rgba(46, 204, 113, 0.1); border-left: 3px solid #2ecc71; padding: 8px;">
                     <h4 style="margin-top: 0; margin-bottom: 8px; color: #2ecc71;">Properties</h4>
@@ -989,7 +1044,7 @@ class ObjectManager {
           html += `</table></div>`;
         }
       } else if (data.type === 'relationship') {
-        // Relationship information with improved layout
+        
         html += `
           <div style="margin-bottom: 12px; background-color: rgba(231, 76, 60, 0.1); border-left: 3px solid #e74c3c; padding: 8px;">
             <div style="margin-bottom: 6px;"><strong>Type:</strong> ${data.label || 'Undefined'}</div>
@@ -1018,7 +1073,7 @@ class ObjectManager {
       // Close the container div
       html += `</div>`;
       
-      // Add the close button with improved styling
+     
       const closeButton = `
         <button class="btn" 
           style="position: absolute; top: 8px; right: 8px; padding: 4px 8px; 
@@ -1032,7 +1087,7 @@ class ObjectManager {
       
       this.infoPanel.innerHTML = html;
       
-      // Vertically center the panel
+   
       this.infoPanel.style.top = "50%";
       this.infoPanel.style.transform = "translateY(-50%)";
     }
@@ -1551,10 +1606,10 @@ class ObjectManager {
       for (const update of nodesToUpdate) {
         update.node.visible = update.visible;
         
-        // Apply quality effects when nodes become visible
+      
         if (update.visible && 
             window.renderManager && 
-            window.renderManager.currentQualityMode === 'quality' &&
+            window.currentQualityMode === 'quality' &&
             !update.node.userData.qualityApplied) {
           const nodeData = this.nodes.get(update.nodeId);
           if (nodeData) {
@@ -1612,23 +1667,23 @@ class ObjectManager {
     }
 
     applyQualityMaterials(envMap) {
-      // Force setting currentQualityMode to 'quality'
+      
       if (window.renderManager) {
-        window.renderManager.currentQualityMode = 'quality';
+        window.currentQualityMode = 'quality';
       }
       
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
         const nodeData = this.nodes.get(nodeId);
         if (!nodeData) continue;
         
-        // Reset quality applied flag to ensure proper update
+        
         nodeObject.userData.qualityApplied = false;
         
-        // Force material update
+        
         const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
         const color = this.getColorForLabel(primaryLabel);
         
-        // Remove existing atmospheric layers and cloud mesh
+       
         if (nodeObject.userData.atmosphereLayers) {
           for (const layer of nodeObject.userData.atmosphereLayers) {
             if (layer && layer.parent === nodeObject) {
@@ -1651,12 +1706,12 @@ class ObjectManager {
           nodeObject.userData.cloudMesh = null;
         }
         
-        // Clean up existing material
+     
         if (nodeObject.material) {
           nodeObject.material.dispose();
         }
         
-        // Determine node radius based on current geometry
+        
         const nodeRadius = nodeObject.geometry.parameters?.radius || 30;
         
         // Create planetary surface material with enhanced features based on LOD
@@ -1692,8 +1747,8 @@ class ObjectManager {
           this.addAtmosphericEffects(nodeObject, color, nodeRadius);
           this.addCloudLayer(nodeObject, color, envMap);
         }
-        else { // close or default
-          // For close LOD, create a more complex object with inner and outer shells
+        else { 
+          
           
           // First, clear any existing children
           while (nodeObject.children.length > 0) {
@@ -1745,40 +1800,40 @@ class ObjectManager {
           nodeObject.material = outerMaterial;
           nodeObject.add(innerMesh);
           
-          // Add atmospheric and cloud effects
+          
           this.addAtmosphericEffects(nodeObject, color, nodeRadius);
           this.addCloudLayer(nodeObject, color, envMap);
         }
         
-        // Mark as quality applied
+       
         nodeObject.userData.qualityApplied = true;
       }
       
-      // Initialize cloud texture cache if needed
+     
       if (!this._cloudTextureCache) {
         this._cloudTextureCache = this.generateCloudTexture();
       }
     }
     
     applyStandardMaterials() {
-      // Force setting currentQualityMode to 'standard'
+     
       if (window.renderManager) {
-        window.renderManager.currentQualityMode = 'standard';
+        window.currentQualityMode = 'standard';
       }
       
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
         const nodeData = this.nodes.get(nodeId);
         if (!nodeData) continue;
         
-        // Reset the quality applied flag
+        
         nodeObject.userData.qualityApplied = false;
         
-        // Remove quality-specific effects
+      
         if (nodeObject.userData.glowMesh) {
           nodeObject.userData.glowMesh.visible = false;
         }
         
-        // Remove atmospheric effects and cloud mesh
+      
         if (nodeObject.userData.atmosphereLayers) {
           if (nodeObject.userData.atmosphereLayers.length > 1) {
             for (let i = 1; i < nodeObject.userData.atmosphereLayers.length; i++) {
@@ -1790,7 +1845,7 @@ class ObjectManager {
               }
             }
             
-            // Keep only a simple glow effect
+       
             nodeObject.userData.atmosphereLayers = nodeObject.userData.atmosphereLayers.slice(0, 1);
           }
         }
@@ -1806,43 +1861,42 @@ class ObjectManager {
           nodeObject.userData.cloudMesh = null;
         }
         
-        // Apply standard materials based on current LOD
+      
         const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
         const color = this.getColorForLabel(primaryLabel);
         const baseSize = 20 + Math.min(70, nodeData.connections * 5);
         
-        // Replace materials with simpler versions but keep the inner/outer shell structure
+       
         if (nodeObject.userData.currentLOD === 'close') {
-          // Keep the structure but simplify materials for close LOD
+          
           this.applyCloseLOD(nodeObject, nodeData, baseSize, false);
         } 
         else if (nodeObject.userData.currentLOD === 'medium') {
           this.applyMediumLOD(nodeObject, nodeData, baseSize, false);
         }
         else {
-          // For far LOD, use a very simple material
+          
           this.applyFarLOD(nodeObject, nodeData, baseSize, false);
         }
       }
     }
     
     applyPerformanceMaterials() {
-      // Force setting currentQualityMode to 'performance'
       if (window.renderManager) {
-        window.renderManager.currentQualityMode = 'performance';
+        window.currentQualityMode = 'performance';
       }
       
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
         const nodeData = this.nodes.get(nodeId);
         if (!nodeData) continue;
         
-        // Reset quality applied flag
+      
         nodeObject.userData.qualityApplied = false;
         
-        // Remove all atmosphere effects and clouds
+       
         this.cleanupQualityEffects(nodeObject);
         
-        // Remove any existing children (outer shells, etc.)
+        
         while (nodeObject.children.length > 0) {
           const child = nodeObject.children[0];
           if (child.material) child.material.dispose();
@@ -1850,19 +1904,16 @@ class ObjectManager {
           nodeObject.remove(child);
         }
         
-        // Apply a single, simple mesh without any fancy materials
+        
         const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
         const color = this.getColorForLabel(primaryLabel);
         const baseSize = 20 + Math.min(70, nodeData.connections * 5);
         
-        // Clean up existing geometry and material
+     
         if (nodeObject.geometry) nodeObject.geometry.dispose();
         if (nodeObject.material) nodeObject.material.dispose();
         
-        // In performance mode, only show a simple inner mesh
-        // No outer transparent shell, no reflections, no special effects
-        
-        // Use very basic geometry with minimal polygon count
+      
         let geometry;
         if (nodeObject.userData.currentLOD === 'far') {
           // Far LOD uses tetrahedron (4 faces)
@@ -1877,14 +1928,13 @@ class ObjectManager {
         
         nodeObject.geometry = geometry;
         
-        // Use MeshBasicMaterial for maximum performance
-        // No lighting calculations, no reflections, flat shading
+     
         nodeObject.material = new THREE.MeshBasicMaterial({
           color: color,
           flatShading: true
         });
         
-        // Make sure it's visible
+  
         nodeObject.visible = true;
       }
     }
@@ -1989,7 +2039,7 @@ class ObjectManager {
       while (nodeObject.children.length > 0) {
         const child = nodeObject.children[0];
         
-        // Dispose of geometry and materials
+      
         if (child.geometry) child.geometry.dispose();
         
         if (child.material) {
@@ -2002,7 +2052,7 @@ class ObjectManager {
           }
         }
         
-        // Special cleanup for atmospheric and cloud effects
+        
         if (child.userData && child.userData.atmosphereLayers) {
           child.userData.atmosphereLayers.forEach(layer => {
             if (layer.geometry) layer.geometry.dispose();
@@ -2013,13 +2063,13 @@ class ObjectManager {
         nodeObject.remove(child);
       }
       
-      // Clean up atmosphere and cloud references
+     
       nodeObject.userData.atmosphereLayers = [];
       nodeObject.userData.cloudLayers = [];
       
-      // Dispose of node's own geometry and material if they exist
+     
       if (nodeObject.geometry) {
-        // Store parameters before disposing
+        
         const geometryParams = nodeObject.geometry.parameters;
         nodeObject.geometry.dispose();
         nodeObject.geometry = null;
@@ -2039,7 +2089,7 @@ class ObjectManager {
         }
       }
       
-      // Handle special materials with uniforms that contain textures
+      
       if (material.uniforms) {
         for (const key in material.uniforms) {
           if (material.uniforms[key].value && 
@@ -2053,14 +2103,14 @@ class ObjectManager {
     }
 
     applyNodeQualityEffects(nodeObject, nodeData) {
-      // Get color for the node
+    
       const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
       const color = this.getColorForLabel(primaryLabel);
       
-      // Mark this node as having quality applied
+    
       nodeObject.userData.qualityApplied = true;
       
-      // Enhance the existing material
+     
       if (nodeObject.material) {
         if (window.renderManager && window.renderManager.envMap) {
           nodeObject.material.envMap = window.renderManager.envMap;
@@ -2174,7 +2224,7 @@ class ObjectManager {
       nodeObject.add(polarRing);
       atmosphereLayers.push(polarRing);
       
-      // Store atmosphere references for animation and cleanup
+     
       nodeObject.userData.atmosphereLayers = atmosphereLayers;
       
       return atmosphereLayers;
@@ -2215,30 +2265,30 @@ class ObjectManager {
     }
 
     updateQualityAnimations(time) {
-      // Skip if no nodes or animations are disabled
+     
       if (this.nodeObjects.size === 0) return;
     
-      // Animate all nodes with quality effects
+     
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
-        // Skip nodes without quality effects
+       
         if (!nodeObject.userData.qualityApplied) continue;
         
-        // Animate atmosphere layers
+   
         if (nodeObject.userData.atmosphereLayers) {
           for (const layer of nodeObject.userData.atmosphereLayers) {
             if (layer.userData.type === 'polarRing') {
-              // Rotate polar rings
+          
               layer.rotation.z = time * 0.2;
             }
           }
         }
         
-        // Animate cloud layers
+   
         if (nodeObject.userData.cloudMesh) {
-          // Rotate clouds slowly
+         
           nodeObject.userData.cloudMesh.rotation.y = time * 0.05;
           
-          // Pulse cloud opacity for visual effect
+        
           const pulseFactor = 0.7 + Math.sin(time * 0.3) * 0.1;
           if (nodeObject.userData.cloudMesh.material) {
             nodeObject.userData.cloudMesh.material.opacity = 0.4 * pulseFactor;
@@ -2253,20 +2303,20 @@ class ObjectManager {
       canvas.width = 512;
       canvas.height = 512;
       
-      // Clear canvas
+      
       ctx.fillStyle = 'rgba(0,0,0,0)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Convert color to RGB
+      
       const r = (color >> 16) & 255;
       const g = (color >> 8) & 255;
       const b = color & 255;
       
-      // Draw cloud-like patterns
+    
       const cloudColor = `rgba(${r}, ${g}, ${b}, 0.1)`;
       ctx.fillStyle = cloudColor;
       
-      // Generate random cloud shapes
+   
       const numShapes = 50;
       for (let i = 0; i < numShapes; i++) {
         const x = Math.random() * canvas.width;
@@ -2278,12 +2328,12 @@ class ObjectManager {
         ctx.fill();
       }
       
-      // Apply Gaussian blur for smoother clouds
+    
       ctx.filter = 'blur(16px)';
       ctx.drawImage(canvas, 0, 0);
       ctx.filter = 'none';
       
-      // Create texture from canvas
+     
       const texture = new THREE.CanvasTexture(canvas);
       texture.needsUpdate = true;
       
@@ -2299,25 +2349,25 @@ class ObjectManager {
     }
 
     forceApplyQualityToAllNodes() {
-      // Check if renderManager exists and get the current quality mode
+     
       const isQualityMode = window.currentQualityMode === 'quality';
 
       console.log(`wtf ${window.currentQualityMode}`);
       
       console.log(`Force applying quality mode to all nodes: ${isQualityMode ? 'quality' : 'standard'}`);
       
-      // Process all nodes
+  
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
         const nodeData = this.nodes.get(nodeId);
         if (!nodeData || !nodeObject) continue;
         
-        // Reset quality flags to ensure proper reapplication
+       
         nodeObject.userData.qualityApplied = false;
         
-        // Clean up any existing atmospheric effects
+      
         this.cleanupQualityEffects(nodeObject);
         
-        // Apply materials based on LOD level and quality mode
+        
         const distance = this.camera.position.distanceTo(nodeObject.position);
         
         if (distance > 10000) {  // Far LOD threshold
@@ -2333,7 +2383,7 @@ class ObjectManager {
           this.applyCloseLOD(nodeObject, nodeData, 20 + Math.min(70, nodeData.connections * 5), isQualityMode);
         }
         
-        // For quality mode, ensure effects are applied
+       
         if (isQualityMode) {
           this.applyNodeQualityEffects(nodeObject, nodeData);
           nodeObject.userData.qualityApplied = true;
@@ -2341,9 +2391,9 @@ class ObjectManager {
       }
     }
     
-    // Add helper function to clean up quality effects
+    
     cleanupQualityEffects(nodeObject) {
-      // Remove atmosphere layers
+  
       if (nodeObject.userData.atmosphereLayers) {
         for (const layer of nodeObject.userData.atmosphereLayers) {
           if (layer && layer.parent === nodeObject) {
