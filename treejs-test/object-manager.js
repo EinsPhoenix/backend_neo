@@ -18,10 +18,10 @@ class ObjectManager {
       this.MIN_DISTANCE = 100;
       this.disableNiceMeshes = false;
       this.groundLightCircle = null;  
-      this.useLOD = true;  // Default enabling LOD
-      this.frustumCulled = true;  // Enable frustum culling
-      this.instancedNodes = null; // For instanced rendering
-      this.visibleNodes = new Set(); // Track visible nodes
+      this.useLOD = true; 
+      this.frustumCulled = true;  
+      this.instancedNodes = null; 
+      this.visibleNodes = new Set(); 
       this.maxVisibleDistance = 15000; 
       this.isPerformanceModeEnabled = false;
   
@@ -48,7 +48,7 @@ class ObjectManager {
   
     setUseLOD(value) {
       this.useLOD = value;
-      // Update all node meshes if they exist
+
       if (this.nodeObjects.size > 0) {
         this.updateNodeLODs();
       }
@@ -67,8 +67,7 @@ class ObjectManager {
       if (!this.useLOD || !nodeObject) return;
       
       const distance = cameraPosition.distanceTo(nodeObject.position);
-      
-      // Base size from connections with a reasonable limit
+  
       const connections = nodeData.connections || 0;
       const baseSize = 20 + Math.min(70, connections * 5);
       
@@ -76,17 +75,17 @@ class ObjectManager {
       const farThreshold = 10000;
       const mediumThreshold = 3000;
       
-      // Store current LOD before potentially changing it
+    
       const previousLOD = nodeObject.userData.currentLOD;
       const isNewNode = previousLOD === undefined || previousLOD === 'none';
       
-      // Get current quality mode
+  
       const isQualityMode = window.currentQualityMode === 'quality';
       
-      // Track LOD change for quality reapplication
+
       let lodChanged = false;
       
-      // If currently at far LOD, use different thresholds to prevent oscillation
+      
       if (nodeObject.userData.currentLOD === 'far' && distance > farThreshold * 0.9) {
         // Keep far LOD
       } else if (nodeObject.userData.currentLOD === 'medium' && 
@@ -116,7 +115,7 @@ class ObjectManager {
         }
       }
       
-      // Apply quality consistently - when LOD changes OR forced check
+     
       if ((lodChanged || forceQualityCheck || isNewNode) && isQualityMode && !nodeObject.userData.qualityApplied) {
         this.applyNodeQualityEffects(nodeObject, nodeData);
       }
@@ -138,13 +137,28 @@ class ObjectManager {
     }
   
     applyFarLOD(nodeObject, nodeData, baseSize, isQualityMode) {
-      // Properly clean up existing materials and geometries
+      
+    
       this.cleanupNodeMeshResources(nodeObject);
       
       const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
       const color = this.getColorForLabel(primaryLabel);
       
-      // Use low-poly geometry for far LOD
+    
+      if (window.currentQualityMode === 'performance') {
+       
+        nodeObject.geometry = new THREE.TetrahedronGeometry(baseSize * 0.8, 0);
+        
+        // Use basic material with no reflections or special effects
+        nodeObject.material = new THREE.MeshBasicMaterial({
+          color: color,
+          flatShading: true
+        });
+        
+        return;
+      }
+      
+      
       nodeObject.geometry = new THREE.OctahedronGeometry(baseSize * 0.8, 0);
       
       // Apply material based on quality mode
@@ -201,9 +215,22 @@ class ObjectManager {
       
       // Get envMap safely
       const envMap = window.renderManager ? window.renderManager.envMap : null;
+
+      if (window.currentQualityMode === 'performance') {
+       
+        nodeObject.geometry = new THREE.TetrahedronGeometry(baseSize * 0.8, 8, 6);
+        
+     
+        nodeObject.material = new THREE.MeshBasicMaterial({
+          color: color,
+          flatShading: true
+        });
+        
+        return;
+      }
       
       if (isQualityMode) {
-        // Apply high quality material for medium LOD
+      
         nodeObject.material = new THREE.MeshPhysicalMaterial({
           color: color,
           emissive: color,
@@ -216,15 +243,13 @@ class ObjectManager {
           clearcoatRoughness: 0.2,
           reflectivity: 0.7
         });
-        
-        // Add atmospheric effects for medium LOD
+
         const nodeRadius = nodeObject.geometry.parameters.radius;
         this.addAtmosphericEffects(nodeObject, color, nodeRadius);
-        
-        // Add simplified cloud layer
+
         this.addCloudLayer(nodeObject, color, envMap);
       } else {
-        // Add a transparent outer shell even in standard mode, but simpler
+    
         const innerGeometry = new THREE.SphereGeometry(baseSize * 0.7, 16, 12);
         const innerMaterial = new THREE.MeshStandardMaterial({
           color: color,
@@ -236,7 +261,7 @@ class ObjectManager {
         
         const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
         
-        // Outer transparent shell with simplified material
+     
         nodeObject.geometry = new THREE.SphereGeometry(baseSize * 0.9, 16, 12);
         nodeObject.material = new THREE.MeshStandardMaterial({
           color: color,
@@ -253,18 +278,34 @@ class ObjectManager {
     }
   
     applyCloseLOD(nodeObject, nodeData, baseSize, isQualityMode) {
-      // Clean up existing resources
+      
       this.cleanupNodeMeshResources(nodeObject);
       
       const innerSize = baseSize * 0.8;
       const primaryLabel = nodeData.labels[0] || `Node ${nodeData.id}`;
       const color = this.getColorForLabel(primaryLabel);
-      
-      // Get envMap safely
+  
       const envMap = window.renderManager ? window.renderManager.envMap : null;
       
+      
+      
+      if (window.currentQualityMode === 'performance') {
+       
+        nodeObject.geometry = new THREE.TetrahedronGeometry(baseSize * 0.8, 16, 12);
+        
+     
+        nodeObject.material = new THREE.MeshBasicMaterial({
+          color: color,
+          flatShading: true
+        });
+        
+        return;
+      }
+
+      
+      
       if (isQualityMode) {
-        // Full quality detail with outer shell and core
+    
         const innerGeometry = new THREE.SphereGeometry(innerSize, 32, 32);
         const innerMaterial = new THREE.MeshPhysicalMaterial({
           color: color,
@@ -279,7 +320,7 @@ class ObjectManager {
           reflectivity: 0.9,
           ior: 1.5
         });
-  
+    
         const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
         innerMesh.position.set(0, 0, 0);
         
@@ -301,17 +342,17 @@ class ObjectManager {
           transmission: 0.2,
           ior: 1.3
         });
-  
+    
         nodeObject.geometry = outerGeometry;
         nodeObject.material = outerMaterial;
         nodeObject.add(innerMesh);
         
-        // Add full atmospheric and cloud effects
+  
         const nodeRadius = nodeObject.geometry.parameters.radius;
         this.addAtmosphericEffects(nodeObject, color, nodeRadius);
         this.addCloudLayer(nodeObject, color, envMap);
       } else {
-        // Standard mode with transparent outer shell but less detailed
+      
         const innerGeometry = new THREE.SphereGeometry(baseSize * 0.7, 20, 20);
         const innerMaterial = new THREE.MeshStandardMaterial({
           color: color,
@@ -323,7 +364,7 @@ class ObjectManager {
         
         const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
         
-        // Outer transparent shell
+       
         nodeObject.geometry = new THREE.SphereGeometry(baseSize * 0.95, 20, 20);
         nodeObject.material = new THREE.MeshStandardMaterial({
           color: color,
@@ -353,7 +394,7 @@ class ObjectManager {
     }
 
     addAtmosphericEffects(nodeObject, color, nodeRadius) {
-      // Clean up any existing atmosphere layers first
+    
       if (nodeObject.userData.atmosphereLayers) {
         nodeObject.userData.atmosphereLayers.forEach(layer => {
           if (layer.geometry) layer.geometry.dispose();
@@ -363,8 +404,7 @@ class ObjectManager {
       }
       
       nodeObject.userData.atmosphereLayers = [];
-      
-      // Inner glow
+   
       const innerGlowGeometry = new THREE.SphereGeometry(nodeRadius * 1.1, 32, 32);
       const innerGlowMaterial = new THREE.MeshBasicMaterial({
         color: color,
@@ -377,7 +417,7 @@ class ObjectManager {
       nodeObject.add(innerGlow);
       nodeObject.userData.atmosphereLayers.push(innerGlow);
       
-      // Outer glow
+  
       const outerGlowGeometry = new THREE.SphereGeometry(nodeRadius * 1.4, 24, 24);
       const outerGlowMaterial = new THREE.MeshBasicMaterial({
         color: color,
@@ -390,7 +430,7 @@ class ObjectManager {
       nodeObject.add(outerGlow);
       nodeObject.userData.atmosphereLayers.push(outerGlow);
       
-      // Ring (Saturn-like) - centered properly
+   
       if (Math.random() > 0.6) {
         const ringGeometry = new THREE.RingGeometry(
           nodeRadius * 1.5, 
@@ -398,11 +438,11 @@ class ObjectManager {
           64
         );
         
-        // Important: Rotate the ring geometry to be horizontal
+      
         ringGeometry.rotateX(Math.PI / 2);
         
         const ringColor = new THREE.Color(color);
-        ringColor.offsetHSL(0, -0.2, 0.2); // Slightly different color from the planet
+        ringColor.offsetHSL(0, -0.2, 0.2); 
         
         const ringMaterial = new THREE.MeshPhysicalMaterial({
           color: ringColor,
@@ -416,19 +456,19 @@ class ObjectManager {
         });
         
         const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-        // Center the ring on the node
+      
         nodeObject.add(ring);
         nodeObject.userData.atmosphereLayers.push(ring);
       }
       
-      // Glitter effect particles
+     
       const particleCount = 200;
       const particleGeometry = new THREE.BufferGeometry();
       const particlePositions = new Float32Array(particleCount * 3);
       const particleSizes = new Float32Array(particleCount);
       
       for (let i = 0; i < particleCount; i++) {
-        // Create particles in a spherical shell around the planet
+      
         const radius = nodeRadius * (1.05 + Math.random() * 0.3);
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(2 * Math.random() - 1);
@@ -437,7 +477,7 @@ class ObjectManager {
         particlePositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
         particlePositions[i * 3 + 2] = radius * Math.cos(phi);
         
-        particleSizes[i] = 0.5 + Math.random() * 2.0; // Random sizes
+        particleSizes[i] = 0.5 + Math.random() * 2.0; 
       }
       
       particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
@@ -486,7 +526,7 @@ class ObjectManager {
     }
     
     addCloudLayer(nodeObject, color, envMap) {
-      // Clean up existing cloud layers
+    
       if (nodeObject.userData.cloudLayers) {
         nodeObject.userData.cloudLayers.forEach(layer => {
           if (layer.geometry) layer.geometry.dispose();
@@ -499,17 +539,17 @@ class ObjectManager {
       
       const nodeRadius = nodeObject.geometry.parameters.radius;
       
-      // Create 2-3 cloud layers with different densities and heights
-      const cloudLayerCount = 2 + Math.floor(Math.random() * 2); // 2 or 3 layers
+  
+      const cloudLayerCount = 2 + Math.floor(Math.random() * 2); 
       
       for (let i = 0; i < cloudLayerCount; i++) {
-        const layerHeight = 1.02 + (i * 0.03); // Stagger heights
+        const layerHeight = 1.02 + (i * 0.03); 
         const cloudGeometry = new THREE.SphereGeometry(
           nodeRadius * layerHeight,
           32, 32
         );
         
-        // More white/bright clouds
+      
         const cloudColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.4 + (i * 0.2));
         
         const cloudMaterial = new THREE.MeshPhysicalMaterial({
@@ -527,7 +567,7 @@ class ObjectManager {
           depthWrite: i === 0
         });
         
-        // Use a displacement map for cloud texture
+
         const displacementMap = this.generateCloudTexture();
         cloudMaterial.displacementMap = displacementMap;
         cloudMaterial.displacementScale = (i + 1) * 2;
@@ -535,23 +575,23 @@ class ObjectManager {
         
         const cloudMesh = new THREE.Mesh(cloudGeometry, cloudMaterial);
         
-        // Random rotation for each layer
+       
         cloudMesh.rotation.set(
           Math.random() * Math.PI * 2,
           Math.random() * Math.PI * 2,
           Math.random() * Math.PI * 2
         );
         
-        // Store initial rotation for animation
+      
         cloudMesh.userData.initialRotation = cloudMesh.rotation.clone();
-        cloudMesh.userData.rotationSpeed = 0.005 - (i * 0.002); // Different speeds
+        cloudMesh.userData.rotationSpeed = 0.05 - (i * 0.02); 
         cloudMesh.userData.rotationAxis = new THREE.Vector3(
           Math.random() - 0.5,
           Math.random() - 0.5,
           Math.random() - 0.5
         ).normalize();
         
-        // Animation function
+       
         cloudMesh.userData.animate = function(time) {
           const axis = this.userData.rotationAxis;
           const speed = this.userData.rotationSpeed;
@@ -1354,26 +1394,28 @@ class ObjectManager {
     }
   
     setPerformanceMode(enabled) {
-        console.log('setPerformanceMode', enabled);
-      if (enabled & !this.isPerformanceModeEnabled) {
+      console.log('setPerformanceMode', enabled);
+      if (enabled && !this.isPerformanceModeEnabled) {
         
         this.setupInstancedRendering();
         
-     
-        for (const nodeObject of this.nodeObjects.values()) {
-          nodeObject.visible = false;
-        }
-        
-      
-        if (this.instancedNodes) {
+        if (this.instancedNodes && this.disableNiceMeshes) {
+       
+          for (const nodeObject of this.nodeObjects.values()) {
+            nodeObject.visible = false;
+          }
+          
           this.instancedNodes.visible = true;
+        } else {
+         
+          this.applyPerformanceMaterials();
         }
         
         this.maxVisibleDistance = 15000;
-
         this.isPerformanceModeEnabled = true;
+        
       } else if (!enabled && this.isPerformanceModeEnabled) {
-      
+       
         if (this.instancedNodes) {
           this.instancedNodes.visible = false;
         }
@@ -1381,7 +1423,14 @@ class ObjectManager {
         for (const nodeObject of this.nodeObjects.values()) {
           nodeObject.visible = true;
         }
-
+        
+       
+        if (window.currentQualityMode === 'quality') {
+          this.applyQualityMaterials(window.renderManager?.envMap);
+        } else {
+          this.applyStandardMaterials();
+        }
+    
         this.maxVisibleDistance = 50000;
         this.isPerformanceModeEnabled = false;
       }
@@ -1731,7 +1780,6 @@ class ObjectManager {
         
         // Remove atmospheric effects and cloud mesh
         if (nodeObject.userData.atmosphereLayers) {
-        
           if (nodeObject.userData.atmosphereLayers.length > 1) {
             for (let i = 1; i < nodeObject.userData.atmosphereLayers.length; i++) {
               const layer = nodeObject.userData.atmosphereLayers[i];
@@ -1741,7 +1789,8 @@ class ObjectManager {
                 nodeObject.remove(layer);
               }
             }
-          
+            
+            // Keep only a simple glow effect
             nodeObject.userData.atmosphereLayers = nodeObject.userData.atmosphereLayers.slice(0, 1);
           }
         }
@@ -1757,19 +1806,86 @@ class ObjectManager {
           nodeObject.userData.cloudMesh = null;
         }
         
-     
-        this.updateNodeLOD(nodeObject, nodeData, this.camera.position, true);
+        // Apply standard materials based on current LOD
+        const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
+        const color = this.getColorForLabel(primaryLabel);
+        const baseSize = 20 + Math.min(70, nodeData.connections * 5);
+        
+        // Replace materials with simpler versions but keep the inner/outer shell structure
+        if (nodeObject.userData.currentLOD === 'close') {
+          // Keep the structure but simplify materials for close LOD
+          this.applyCloseLOD(nodeObject, nodeData, baseSize, false);
+        } 
+        else if (nodeObject.userData.currentLOD === 'medium') {
+          this.applyMediumLOD(nodeObject, nodeData, baseSize, false);
+        }
+        else {
+          // For far LOD, use a very simple material
+          this.applyFarLOD(nodeObject, nodeData, baseSize, false);
+        }
       }
     }
     
     applyPerformanceMaterials() {
-      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+      // Force setting currentQualityMode to 'performance'
+      if (window.renderManager) {
+        window.renderManager.currentQualityMode = 'performance';
+      }
       
-        if (nodeObject.userData.glowMesh) {
-          nodeObject.userData.glowMesh.visible = false;
+      for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
+        const nodeData = this.nodes.get(nodeId);
+        if (!nodeData) continue;
+        
+        // Reset quality applied flag
+        nodeObject.userData.qualityApplied = false;
+        
+        // Remove all atmosphere effects and clouds
+        this.cleanupQualityEffects(nodeObject);
+        
+        // Remove any existing children (outer shells, etc.)
+        while (nodeObject.children.length > 0) {
+          const child = nodeObject.children[0];
+          if (child.material) child.material.dispose();
+          if (child.geometry) child.geometry.dispose();
+          nodeObject.remove(child);
         }
         
-      
+        // Apply a single, simple mesh without any fancy materials
+        const primaryLabel = nodeData.labels[0] || `Node ${nodeId}`;
+        const color = this.getColorForLabel(primaryLabel);
+        const baseSize = 20 + Math.min(70, nodeData.connections * 5);
+        
+        // Clean up existing geometry and material
+        if (nodeObject.geometry) nodeObject.geometry.dispose();
+        if (nodeObject.material) nodeObject.material.dispose();
+        
+        // In performance mode, only show a simple inner mesh
+        // No outer transparent shell, no reflections, no special effects
+        
+        // Use very basic geometry with minimal polygon count
+        let geometry;
+        if (nodeObject.userData.currentLOD === 'far') {
+          // Far LOD uses tetrahedron (4 faces)
+          geometry = new THREE.TetrahedronGeometry(baseSize * 0.7, 0);
+        } else if (nodeObject.userData.currentLOD === 'medium') {
+          // Medium LOD uses octahedron (8 faces)
+          geometry = new THREE.OctahedronGeometry(baseSize * 0.7, 0);
+        } else {
+          // Close LOD uses icosahedron (20 faces)
+          geometry = new THREE.IcosahedronGeometry(baseSize * 0.7, 0);
+        }
+        
+        nodeObject.geometry = geometry;
+        
+        // Use MeshBasicMaterial for maximum performance
+        // No lighting calculations, no reflections, flat shading
+        nodeObject.material = new THREE.MeshBasicMaterial({
+          color: color,
+          flatShading: true
+        });
+        
+        // Make sure it's visible
+        nodeObject.visible = true;
       }
     }
     
@@ -2175,7 +2291,7 @@ class ObjectManager {
     }
 
     getCloudTexture() {
-      // Cache the cloud texture to avoid regenerating it every time
+      
       if (!this._cloudTextureCache) {
         this._cloudTextureCache = this.generateCloudTexture();
       }
@@ -2249,6 +2365,21 @@ class ObjectManager {
           nodeObject.userData.cloudMesh.geometry.dispose();
         }
         nodeObject.userData.cloudMesh = null;
+      }
+      
+      // Remove any glitter particles or special effects
+      for (let i = nodeObject.children.length - 1; i >= 0; i--) {
+        const child = nodeObject.children[i];
+        if (child.userData && 
+           (child.userData.type === 'glitter' || 
+            child.userData.type === 'atmosphere' || 
+            child.userData.type === 'cloudLayer' ||
+            child.userData.type === 'polarRing')) {
+          
+          if (child.material) child.material.dispose();
+          if (child.geometry) child.geometry.dispose();
+          nodeObject.remove(child);
+        }
       }
     }
   }

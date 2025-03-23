@@ -590,7 +590,7 @@ class RenderManager {
     
     updateLODBasedOnPerformance() {
     
-      if (!window.objectManager || !this.useLOD || this.currentFPS <= 0) return;
+      if (!window.objectManager || !this.useLOD || this.currentFPS <= 0 || window.currentQualityMode == "performance") return;
       
    
       let performanceLevel = 'normal';
@@ -810,13 +810,12 @@ class RenderManager {
         this.setRenderDistance(preset.renderDistance);
       }
       
-      // Apply object manager settings based on quality preset
+      
       if (window.objectManager) {
-        // Turn performance mode on/off as needed
+        
         window.objectManager.setPerformanceMode(presetName === 'performance');
         
-        // Force update all node materials to match the current quality preset
-        // This ensures consistent appearance for all nodes
+       
         if (presetName === 'quality') {
           window.objectManager.forceApplyQualityToAllNodes();
         } else if (presetName === 'standard') {
