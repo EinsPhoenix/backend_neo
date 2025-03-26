@@ -1,4 +1,4 @@
-use crate::query::{index_database, reset_database, alter_database,load_big_json_file};
+use crate::query::{index_database, reset_database, alter_database,process_large_json_file};
 use log::{error, info};
 use std::process::exit;
 use std::sync::Arc;
@@ -52,7 +52,7 @@ pub async fn router(command: &str, db_handler: Arc<db::DatabaseCluster>) -> Resu
         "load" => {
             info!{"Load Json from Server..."};
             let db = db_handler.get_primary_db().await;
-            match load_big_json_file(&db).await{
+            match process_large_json_file(&db).await{
                 Ok(_) => {
                     info!("Successfull add");
                     Ok(true)

@@ -55,13 +55,14 @@ async fn handle_command(json: &Value, db_handler: Arc<db::DatabaseCluster>) {
 async fn handle_data(json: &Value, db_handler: Arc<db::DatabaseCluster>) {
     if let Some(data) = json.get("data") {
         
-        info!("Received data");
         let primary_conn = db_handler.get_primary_db().await;
       
-        match create_new_relation(json, &primary_conn).await {
+        match create_new_relation(data, &primary_conn).await {
             Ok(true) => println!("Relations created successfully"),
             Ok(false) => println!("No new relations created"),
-            Err(error_msg) => println!("Error: {}", error_msg)
+            Err(error_msg) => println!("Error: {}", error_msg),
         }
+    } else {
+        error!("No 'data' field found in JSON");
     }
 }

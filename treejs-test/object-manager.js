@@ -120,7 +120,7 @@ class ObjectManager {
         this.applyNodeQualityEffects(nodeObject, nodeData);
       }
       
-      // Handle visibility based on distance
+   
       if (distance > this.maxVisibleDistance * 1.1) {
         if (nodeObject.visible) {
           nodeObject.visible = false;
@@ -1262,7 +1262,7 @@ class ObjectManager {
       if (!object || !object.material) return;
       
       if (object.userData.type === 'node') {
-        // Restore emissive properties only if the material supports it
+      
         if (object.material.emissive && object.userData.originalEmissive !== undefined) {
           object.material.emissive.setHex(object.userData.originalEmissive);
         }
@@ -1270,22 +1270,22 @@ class ObjectManager {
           object.material.emissiveIntensity = object.userData.originalEmissiveIntensity;
         }
         
-        // Always restore original color
+      
         if (object.userData.originalColor !== undefined) {
           object.material.color.setHex(object.userData.originalColor);
         }
         
-        // Restore children materials if any
+       
         if (object.userData.childrenOriginalMaterials && object.children) {
           object.children.forEach((child, index) => {
             const originalMaterial = object.userData.childrenOriginalMaterials[index];
             if (child.material && originalMaterial) {
-              // Restore color
+      
               if (originalMaterial.color !== undefined) {
                 child.material.color.setHex(originalMaterial.color);
               }
               
-              // Restore emissive properties only if material supports it
+             
               if (child.material.emissive && originalMaterial.emissive !== undefined) {
                 child.material.emissive.setHex(originalMaterial.emissive);
               }
@@ -1306,7 +1306,7 @@ class ObjectManager {
     }
   
     updateLabels() {
-      // Update LODs if enabled (keeping existing code)
+     
       if (this.useLOD) {
         for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
           const nodeData = this.nodes.get(nodeId);
@@ -1316,7 +1316,7 @@ class ObjectManager {
         }
       }
     
-      // Node labels update (keeping existing code)
+ 
       for (const [nodeId, label] of this.nodeLabels.entries()) {
         const node = this.nodeObjects.get(nodeId);
         if (node && node.visible) {
@@ -1345,25 +1345,24 @@ class ObjectManager {
         }
       }
       
-      // Relationship labels update - FIXED VERSION
+     
       for (let i = 0; i < this.lineLabels.length; i++) {
         const labelInfo = this.lineLabels[i];
         const relLine = i < this.lineObjects.length ? this.lineObjects[i] : null;
         
-        // Only update and show labels when the relationship line is visible
+      
         if (relLine && relLine.visible) {
           const startNode = this.nodeObjects.get(labelInfo.startId);
           const endNode = this.nodeObjects.get(labelInfo.endId);
       
           if (startNode && endNode) {
-            // For partially visible relationships, calculate best label position
-            // even if one of the nodes is not visible
+      
             const startPos = startNode.position;
             const endPos = endNode.position;
             
-            // Get the midpoint between visible nodes or closest visible point
+          
             const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
-            midPoint.y += 20; // Lift label slightly above the line
+            midPoint.y += 20; 
             
             labelInfo.sprite.position.copy(midPoint);
             labelInfo.sprite.lookAt(this.camera.position);
@@ -1387,11 +1386,11 @@ class ObjectManager {
             labelInfo.sprite.scale.set(200 * scale, 50 * scale, 1);
             labelInfo.sprite.visible = true;
           } else {
-            // Edge case: relationships with missing nodes
+          
             labelInfo.sprite.visible = false;
           }
         } else {
-          // Line is not visible, hide the label
+      
           labelInfo.sprite.visible = false;
         }
       }
@@ -1430,7 +1429,7 @@ class ObjectManager {
       const tempMatrix = new THREE.Matrix4();
       const tempColor = new THREE.Color();
       
-      // Set position and color for each instance
+  
       for (const [nodeId, nodeObject] of this.nodeObjects.entries()) {
         const nodeData = this.nodes.get(nodeId);
         if (nodeData) {

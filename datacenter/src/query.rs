@@ -1,4 +1,4 @@
-use neo4rs::{Graph, query, Query};
+use neo4rs::{Graph, query};
 use log::{error, info, warn};
 use serde_json::{json, Value, Deserializer};
 use std::collections::HashMap;
@@ -103,7 +103,11 @@ pub async fn create_new_relation(data: &Value, graph: &Graph) -> Result<bool, St
         WHERE existingUuid IS NULL
         MERGE (uuid:UUID {id: record.uuid})
         SET uuid.energy_consume = record.energy_consume,
-            uuid.energy_cost = record.energy_cost
+            uuid.energy_cost = record.energy_cost,
+            uuid.color = record.color,
+            uuid.timestamp = record.timestamp,
+            uuid.temperature = record.`sensor_data.temperature`,
+            uuid.humidity = record.`sensor_data.humidity`
         MERGE (color:Color {value: record.color})
         MERGE (uuid)-[:HAS_COLOR]->(color)
         MERGE (temperature:Temperature {value: record.`sensor_data.temperature`})
@@ -152,42 +156,44 @@ pub async fn create_new_relation(data: &Value, graph: &Graph) -> Result<bool, St
 
 
 pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> {
+    let start_time = std::time::Instant::now();
+    
+  
     let query = query(r#"
         MATCH (uuidNode:UUID {id: $uuid})
-        OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
-        OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
-        OPTIONAL MATCH (uuidNode)-[:HAS_TEMPERATURE]->(temp:Temperature)
-        OPTIONAL MATCH (uuidNode)-[:HAS_HUMIDITY]->(humidity:Humidity)
-        WITH uuidNode, color, timestamp, temp, humidity
-        ORDER BY timestamp.value DESC
-        LIMIT 1
         RETURN uuidNode.id AS uuid,
-               color.value AS color,
-               { temperature: temp.value, humidity: humidity.value } AS sensor_data,
-               timestamp.value AS timestamp,
-               uuidNode.energy_consume AS energy_consume,
-               uuidNode.energy_cost AS energy_cost
-
+            uuidNode.color AS color,
+            uuidNode.temperature AS temperature,
+            uuidNode.humidity AS humidity,
+            uuidNode.timestamp AS timestamp,
+            uuidNode.energy_consume AS energy_consume,
+            uuidNode.energy_cost AS energy_cost
+        LIMIT 1
     "#)
     .param("uuid", uuid);
 
     match graph.execute(query).await {
         Ok(mut result) => {
             if let Ok(Some(row)) = result.next().await {
-                
+              
                 let uuid_val: String = row.get("uuid").unwrap_or_default();
                 let color_val: String = row.get("color").unwrap_or_default();
-                let sensor_data: Value = row.get("sensor_data").unwrap_or(json!({}));
+                let temperature: f64 = row.get("temperature").unwrap_or(0.0);
+                let humidity: f64 = row.get("humidity").unwrap_or(0.0);
                 let timestamp_val: String = row.get("timestamp").unwrap_or_default();
                 let energy_consume: f64 = row.get("energy_consume").unwrap_or(0.0);
                 let energy_cost: f64 = row.get("energy_cost").unwrap_or(0.0);
 
+                let elapsed = start_time.elapsed();
+                
+                
+             
                 Some(json!({
                     "uuid": uuid_val,
                     "color": color_val,
                     "sensor_data": {
-                        "temperature": sensor_data["temperature"].as_f64().unwrap_or(0.0),
-                        "humidity": sensor_data["humidity"].as_f64().unwrap_or(0.0)
+                        "temperature": temperature,
+                        "humidity": humidity
                     },
                     "timestamp": timestamp_val,
                     "energy_consume": energy_consume,
@@ -208,26 +214,13 @@ pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> 
 pub async fn get_all_uuid_nodes(graph: &Graph) -> Option<Value> {
     let query = query(r#"
         MATCH (uuidNode:UUID)
-        OPTIONAL MATCH (uuidNode)-[:HAS_COLOR]->(color:Color)
-        OPTIONAL MATCH (uuidNode)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
-        OPTIONAL MATCH (uuidNode)-[:HAS_TEMPERATURE]->(temp:Temperature)
-        OPTIONAL MATCH (uuidNode)-[:HAS_HUMIDITY]->(humidity:Humidity)
-
-        WITH uuidNode, color, timestamp, temp, humidity
-        ORDER BY timestamp.value DESC
-
-        WITH uuidNode, 
-            color.value AS color, 
-            timestamp.value AS latest_timestamp, 
-            temp.value AS temperature, 
-            humidity.value AS humidity
-
         RETURN uuidNode.id AS uuid,
-            color,
-            { temperature: temperature, humidity: humidity } AS sensor_data,
-            latest_timestamp AS timestamp,
+            uuidNode.color AS color,
+            { temperature: uuidNode.temperature, humidity: uuidNode.humidity } AS sensor_data,
+            uuidNode.timestamp AS timestamp,
             uuidNode.energy_consume AS energy_consume,
             uuidNode.energy_cost AS energy_cost
+        ORDER BY uuidNode.timestamp DESC
     "#);
 
     match graph.execute(query).await {
@@ -558,204 +551,133 @@ pub async fn reset_database(graph: &Graph) -> Result<bool, String> {
     }
 }
 
-
-
-/// Läd eine große JSON-Datei asynchron und verarbeitet jedes JSON-Objekt separat.
-
+// BIG JSON
 use std::fs::File;
-
-use std::sync::Arc;
-use memmap2::Mmap;
-use rayon::prelude::*;
-use serde::Deserialize;
-use tokio::sync::Semaphore;
+use std::io::BufReader;
+use std::path::PathBuf;
+use std::error::Error;
 
 
-const CONCURRENT_BATCHES: usize = 10;
-const BATCH_SIZE: usize = 1000;
-
-pub async fn load_big_json_file(graph: &Graph) -> Result<bool, String> {
-    let file_path = ".\\data.json";
-
-    let start_time = std::time::Instant::now();
+pub async fn process_large_json_file(graph: &Graph) -> Result<bool, Box<dyn Error>> {
+    
+    let possible_paths = [
+        PathBuf::from("data.json"),                    
+        PathBuf::from("./data.json"),                  
+        PathBuf::from("../data.json"),                 
+        PathBuf::from("src/data.json"),               
+        PathBuf::from("datacenter/src/data.json"),    
+        PathBuf::from("backend_neo/datacenter/src/data.json"), 
+        
+    ];
     
    
-    let file = File::open(file_path)
-        .map_err(|e| format!("Failed to open file: {}", e))?;
+    let mut file_path = None;
+    for path in &possible_paths {
+        if path.exists() {
+            info!("Found data.json at: {}", path.display());
+            file_path = Some(path);
+            break;
+        }
+    }
     
-    let mmap = unsafe { Mmap::map(&file) }
-        .map_err(|e| format!("Memory mapping failed: {}", e))?;
+    
+    let file_path = file_path.ok_or_else(|| {
+        let error_msg = format!(
+            "data.json not found in any of the expected locations. Checked paths: {:?}",
+            possible_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()
+        );
+        error!("{}", &error_msg);
+        error_msg
+    })?;
 
-    let root = parse_json_with_streaming(&mmap)?;
+    info!("Opening JSON file at: {}", file_path.display());
+    let file = File::open(&file_path)?;
+    let file_size = file.metadata()?.len();
+    info!("File size: {} bytes ({:.2} MB)", file_size, file_size as f64 / 1_048_576.0);
+    
+    
+    let buffer_size = 1024 * 1024; 
+    let reader = BufReader::with_capacity(buffer_size, file);
+
+   
+    let stream = Deserializer::from_reader(reader).into_iter::<Value>();
+    let mut success_count = 0;
+    let mut failure_count = 0;
+    let mut processed_count = 0;
 
  
-    process_data_in_parallel(Arc::new(graph.clone()), &root).await?;
-
-    info!("Gesamtverarbeitungszeit: {:.2?}", start_time.elapsed());
-    Ok(true)
-}
-
-fn parse_json_with_streaming(mmap: &Mmap) -> Result<Value, String> {
-   
-    let mut deserializer = Deserializer::from_slice(&mmap);
-   
-    Value::deserialize(&mut deserializer)
-        .map_err(|e| format!("JSON Deserialization error: {}", e))
-}
-
-
-async fn process_data_in_parallel(graph: Arc<Graph>, data: &Value) -> Result<(), String> {
-    let data_array = data.get("data")
-        .and_then(|d| d.as_array())
-        .ok_or("Missing or invalid data array")?;
-
- 
-    let neo4j_data: Vec<HashMap<String, Value>> = data_array
-        .par_iter()
-        .map(|item| {
-            let mut record = HashMap::new();
-            
-          
-            extract_field(&mut record, item, "uuid");
-            extract_field(&mut record, item, "color");
-            extract_field(&mut record, item, "timestamp");
-            extract_float_field(&mut record, item, "energy_consume");
-            extract_float_field(&mut record, item, "energy_cost");
-            process_sensor_data(&mut record, item);
-            
-            record
-        })
-        .collect();
-
-  
-    let semaphore = Arc::new(Semaphore::new(CONCURRENT_BATCHES));
-    let mut tasks = vec![];
-
-    for chunk in neo4j_data.chunks(BATCH_SIZE) {
-        let graph = graph.clone();
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
-        let batch = chunk.to_vec();
-
-        tasks.push(tokio::spawn(async move {
-            let result = process_batch(&graph, &batch).await;
-            drop(permit);
-            result
-        }));
-    }
-
-   
-    let results = futures::future::join_all(tasks).await;
-    for res in results {
-        match res {
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => error!("Batch Fehler: {}", e),
-            Err(e) => error!("Task Fehler: {}", e),
+    info!("Starting JSON processing...");
+    for item in stream {
+        processed_count += 1;
+        if processed_count % 100 == 0 {
+            info!("Processed {} items so far...", processed_count);
         }
-    }
-
-    Ok(())
-}
-
-fn extract_field(record: &mut HashMap<String, Value>, item: &Value, field: &str) {
-    if let Some(val) = item.get(field).and_then(|v| v.as_str()) {
-        record.insert(field.to_string(), Value::String(val.to_string()));
-    }
-}
-
-fn extract_float_field(record: &mut HashMap<String, Value>, item: &Value, field: &str) {
-    if let Some(val) = item.get(field).and_then(|v| v.as_f64()) {
-        if let Some(num) = serde_json::Number::from_f64(val) {
-            record.insert(field.to_string(), Value::Number(num));
-        }
-    }
-}
-
-fn process_sensor_data(record: &mut HashMap<String, Value>, item: &Value) {
-    if let Some(sensor_data) = item.get("sensor_data").and_then(|v| v.as_object()) {
-        if let Some(temp) = sensor_data.get("temperature").and_then(|v| v.as_f64()) {
-            if let Some(num) = serde_json::Number::from_f64(temp) {
-                record.insert("sensor_data.temperature".to_string(), Value::Number(num));
-            }
-        }
-        if let Some(humidity) = sensor_data.get("humidity").and_then(|v| v.as_f64()) {
-            if let Some(num) = serde_json::Number::from_f64(humidity) {
-                record.insert("sensor_data.humidity".to_string(), Value::Number(num));
+        
+        match item {
+            Ok(data) => {
+                match create_new_relation(&data, graph).await {
+                    Ok(true) => {
+                        success_count += 1;
+                        if success_count % 100 == 0 {
+                            info!("Successfully processed {} records", success_count);
+                        }
+                    },
+                    Ok(false) => {
+                      
+                    },
+                    Err(e) => {
+                        error!("Error processing JSON batch: {}", e);
+                        failure_count += 1;
+                    }
+                }
+            },
+            Err(e) => {
+                error!("Error parsing JSON item #{}: {}", processed_count, e);
+                failure_count += 1;
+                
+                
+                if failure_count > 10 && processed_count < 20 {
+                    return Err("Too many JSON parsing errors. Check if the file format is correct.".into());
+                }
             }
         }
     }
-}
 
-async fn process_batch(graph: &Graph, batch: &[HashMap<String, Value>]) -> Result<(), String> {
-    let json_data = serde_json::to_string(batch)
-        .map_err(|e| format!("Serialisierungsfehler: {}", e))?;
+    info!("Finished processing JSON file. Total items: {}, Successes: {}, Failures: {}", 
+          processed_count, success_count, failure_count);
 
-    let query = create_optimized_query(&json_data);
-    
-    let mut result = graph.execute(query)
-        .await
-        .map_err(|e| format!("Neo4j Fehler: {}", e))?;
-
-    let mut processed = 0;
-    while let Ok(Some(_)) = result.next().await {
-        processed += 1;
+    if failure_count == 0 {
+        Ok(true)
+    } else {
+        Err(format!("Encountered {} failures while processing {} items", failure_count, processed_count).into())
     }
-
-    if processed > 0 {
-        info!("Batch verarbeitet: {} Einträge", processed);
-    }
-    Ok(())
 }
-
-fn create_optimized_query(data: &str) -> Query {
-    query(
-        r#"
-        UNWIND apoc.convert.fromJsonList($data) AS record
-        MERGE (uuid:UUID {id: record.uuid})
-        ON CREATE SET
-            uuid.energy_consume = record.energy_consume,
-            uuid.energy_cost = record.energy_cost
-        
-        MERGE (color:Color {value: record.color})
-        MERGE (uuid)-[:HAS_COLOR]->(color)
-        
-        FOREACH (_ IN CASE WHEN record.`sensor_data.temperature` IS NOT NULL THEN [1] ELSE [] END |
-            MERGE (t:Temperature {value: record.`sensor_data.temperature`})
-            MERGE (uuid)-[:HAS_TEMPERATURE]->(t)
-        )
-        
-        FOREACH (_ IN CASE WHEN record.`sensor_data.humidity` IS NOT NULL THEN [1] ELSE [] END |
-            MERGE (h:Humidity {value: record.`sensor_data.humidity`})
-            MERGE (uuid)-[:HAS_HUMIDITY]->(h)
-        )
-        
-        MERGE (ts:Timestamp {value: record.timestamp})
-        MERGE (uuid)-[:HAS_TIMESTAMP]->(ts)
-        
-        WITH ts, record
-        WHERE record.energy_cost IS NOT NULL
-        MERGE (ec:EnergyCost {value: record.energy_cost})
-        MERGE (ts)-[:HAS_PRICE]->(ec)
-        "#
-    )
-    .param("data", data)
-}
-
-
 
 
 //Tests
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, thread::sleep};
+    use std::sync::Arc;
 
     use super::*;
     use neo4rs::{query, Graph};
     use serde_json::json;
     use crate::db;
+    use std::fs::OpenOptions;
+    use std::io::Write;
     use std::fs;
+   
 
-    use tokio::time::{Duration};
+   async fn write_to_log(message: &str) {
+    let mut file = OpenOptions::new()
+        .create(true)  
+        .append(true)  
+        .open("test_log.txt")
+        .expect("Konnte test_log.txt nicht öffnen");
+
+    writeln!(file, "{}", message).expect("Konnte nicht in test_log.txt schreiben");
+}
 
     async fn get_graph() -> Arc<neo4rs::Graph> {
         let db_handler = db::get_database().await.unwrap();
@@ -867,14 +789,22 @@ mod tests {
         });
         // error
         let result = create_new_relation(&data, &graph).await;
-        assert!(result.is_err(), "Should return Err for serialization error");
+
+        let iserror = result.is_err();
+
+        write_to_log(&format!(
+            "Test for serialization error returned: {:?}, success: {:?}",
+             result, iserror
+        ))
+        .await;
+        assert!(iserror, "Should return Err for serialization error");
     }
 
     #[tokio::test]
     async fn test_export_all_with_relationships() {
         let graph = get_graph().await;
         
-        let result = export_all_with_relationships(&graph, Some(5000)).await;
+        let result = export_all_with_relationships(&graph, Some(100)).await;
         
     
         assert!(result.is_some(), "Exportfunktion sollte Some(Value) zurückgeben");
@@ -888,6 +818,46 @@ mod tests {
 
         
     }
+
+    #[tokio::test]
+    async fn test_get_specific_uuid_node() {
+        let graph = get_graph().await;
+        let test_uuid = "test-uuid-specific";
+    
+        let data = json!({
+            "data": [{
+                "uuid": test_uuid,
+                "color": "test-color",
+                "sensor_data": {
+                    "temperature": 25555.5,
+                    "humidity": 3000.0
+                },
+                "timestamp": "2023-10-01T00:00:00Z",
+                "energy_consume": 10000.0,
+                "energy_cost": 50000.0
+            }]
+        });
+    
+        let _ = create_new_relation(&data, &graph).await;
+        let start_time = std::time::Instant::now();
+        
+        let result = get_specific_uuid_node(test_uuid, &graph).await;
+        let elapsed = start_time.elapsed();
+        
+        let test_succeeded = result.is_some();
+        
+        write_to_log(&format!(
+            "Test for getting a node with uuid: execution time: {:?}, returned: {:?}, success: {}",
+            elapsed, result, test_succeeded
+        ))
+        .await;
+    
+        assert!(test_succeeded, "Should return Some(Value) for specific UUID");
+    
+        cleanup_test_data(&graph, test_uuid).await;
+    }
+    
+    
 
 
 
