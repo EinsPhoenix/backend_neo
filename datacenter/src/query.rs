@@ -4,7 +4,7 @@ use serde_json::{json, Value, Deserializer};
 use std::collections::HashMap;
 
 
-//validate function
+// validate function
 
 async fn validate_data(data: &Value) -> bool {
     let data_array = match data.get("data").and_then(|d| d.as_array()) {
@@ -184,7 +184,7 @@ pub async fn get_specific_uuid_node(uuid: &str, graph: &Graph) -> Option<Value> 
                 let energy_consume: f64 = row.get("energy_consume").unwrap_or(0.0);
                 let energy_cost: f64 = row.get("energy_cost").unwrap_or(0.0);
 
-                let elapsed = start_time.elapsed();
+                
                 
                 
              
@@ -471,6 +471,81 @@ pub async fn get_newest_uuid(graph: &Graph) -> Option<Value> {
                 uuids.push(node);
             }
             Some(json!(uuids))
+        },
+        Err(e) => {
+            error!("Failed to execute Neo4j query: {}", e);
+            None
+        }
+    }
+}
+
+pub async fn get_paginated_uuids(graph: &Graph, page: usize) -> Option<Value> {
+    const PAGE_SIZE: usize = 50;
+    
+   
+    let count_query = query(r#"
+        MATCH (uuidNode:UUID)
+        RETURN count(uuidNode) AS total
+    "#);
+    
+    let total_count = match graph.execute(count_query).await {
+        Ok(mut result) => {
+            if let Ok(Some(row)) = result.next().await {
+                let count: i64 = row.get("total").unwrap_or(0);
+                count as usize
+            } else {
+                0
+            }
+        },
+        Err(e) => {
+            error!("Failed to execute count query: {}", e);
+            return None;
+        }
+    };
+    
+   
+    let total_pages = if total_count == 0 {
+        0
+    } else {
+        (total_count + PAGE_SIZE - 1) / PAGE_SIZE 
+    };
+    
+    
+    let skip = page * PAGE_SIZE;
+    
+    
+    let data_query = query(r#"
+        MATCH (uuidNode:UUID)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
+        WITH uuidNode, timestamp
+        ORDER BY timestamp.value DESC
+        RETURN uuidNode.id AS uuid
+        SKIP $skip
+        LIMIT $limit
+    "#)
+    .param("skip", skip as i64)
+    .param("limit", PAGE_SIZE as i64);
+    
+    match graph.execute(data_query).await {
+        Ok(mut result) => {
+            let mut uuids = Vec::new();
+            while let Ok(Some(row)) = result.next().await {
+                let node: Value = row.get("uuid").unwrap();
+                uuids.push(node);
+            }
+            
+            info!("Returning page {} of {} with {} UUIDs", 
+                  page, total_pages, uuids.len());
+            
+           
+            Some(json!({
+                "uuids": uuids,
+                "pagination": {
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "current_page": page,
+                    "page_size": PAGE_SIZE
+                }
+            }))
         },
         Err(e) => {
             error!("Failed to execute Neo4j query: {}", e);
@@ -857,6 +932,63 @@ mod tests {
         cleanup_test_data(&graph, test_uuid).await;
     }
     
+    #[tokio::test]
+    async fn test_get_paginated_uuids() {
+        let graph = get_graph().await;
+        
+      
+        let first_page_result = get_paginated_uuids(&graph, 0).await;
+        assert!(first_page_result.is_some(), "Should return Some(Value) for first page");
+        
+        let first_page = first_page_result.unwrap();
+        let uuids = first_page["uuids"].as_array().unwrap();
+        let total_count = first_page["pagination"]["total_count"].as_u64().unwrap() as usize;
+        let total_pages = first_page["pagination"]["total_pages"].as_u64().unwrap() as usize;
+        let current_page = first_page["pagination"]["current_page"].as_u64().unwrap() as usize;
+        let page_size = first_page["pagination"]["page_size"].as_u64().unwrap() as usize;
+        
+        assert_eq!(current_page, 0, "Current page should be 0");
+        assert_eq!(page_size, 50, "Page size should be 50");
+        
+       
+        write_to_log(&format!(
+            "Pagination test - Total count: {}, Total pages: {}, First page UUIDs: {}",
+            total_count, total_pages, uuids.len()
+        )).await;
+        
+        
+        let expected_first_page_count = std::cmp::min(page_size, total_count);
+        assert_eq!(uuids.len(), expected_first_page_count, 
+                  "First page should contain the expected number of UUIDs");
+        
+       
+        if total_pages > 1 {
+            let last_page_index = total_pages - 1;
+            let last_page_result = get_paginated_uuids(&graph, last_page_index).await;
+            assert!(last_page_result.is_some(), "Should return Some(Value) for last page");
+            
+            let last_page = last_page_result.unwrap();
+            let last_page_uuids = last_page["uuids"].as_array().unwrap();
+            let last_page_current = last_page["pagination"]["current_page"].as_u64().unwrap() as usize;
+            
+            assert_eq!(last_page_current, last_page_index, "Current page should be the last page index");
+            
+        
+            write_to_log(&format!(
+                "Pagination test - Last page ({}): UUIDs count: {}",
+                last_page_index, last_page_uuids.len()
+            )).await;
+          
+            let expected_last_page_count = if total_count % page_size == 0 {
+                page_size
+            } else {
+                total_count % page_size
+            };
+            
+            assert_eq!(last_page_uuids.len(), expected_last_page_count,
+                      "Last page should contain the expected number of UUIDs");
+        }
+    }
     
 
 

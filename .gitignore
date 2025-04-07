@@ -161,3 +161,5 @@ dist
 .pnp.*
 
 **/.mosquitto.log
+
+**/test_log.txt

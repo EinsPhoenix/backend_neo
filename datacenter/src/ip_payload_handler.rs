@@ -1,4 +1,4 @@
-use log::{info, error};
+use log::{info};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
