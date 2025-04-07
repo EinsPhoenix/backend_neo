@@ -30,7 +30,6 @@ class TcpClient:
             return False
 
         try:
-
             prompt = self.socket.recv(1024).decode("utf-8")
             print(f"Server: {prompt}", end="")
 
@@ -45,8 +44,37 @@ class TcpClient:
             self.connected = False
             return False
 
+    def receive_response(self, buffer_size=4096):
+        """Receive and parse JSON response from the server."""
+        if not self.connected:
+            print("Not connected to server.")
+            return None
+
+        try:
+
+            response_data = ""
+            while not response_data.endswith("\n"):
+                chunk = self.socket.recv(buffer_size).decode("utf-8")
+                if not chunk:
+                    self.connected = False
+                    return None
+                response_data += chunk
+
+            # Parse JSON response
+            try:
+                return json.loads(response_data.strip())
+            except json.JSONDecodeError as e:
+                print(f"Error parsing response: {e}")
+                print(f"Raw response: {response_data}")
+                return None
+
+        except Exception as e:
+            print(f"Error receiving response: {e}")
+            self.connected = False
+            return None
+
     def send_json(self, data):
-        """Send JSON data to the server."""
+        """Send JSON data to the server and return the response."""
         if not self.connected:
             print("Not connected to server.")
             return False
@@ -54,12 +82,25 @@ class TcpClient:
         try:
             json_data = json.dumps(data)
             self.socket.sendall(json_data.encode("utf-8"))
-            # print(f"Sent: {json_data}")
-            return True
+
+            response = self.receive_response()
+
+            if response:
+                status = response.get("status", "unknown")
+                message = response.get("message", "No message provided")
+
+                if status == "success":
+                    print(f"\033[92mSuccess:\033[0m {message}")
+                elif status == "error":
+                    print(f"\033[91mError:\033[0m {message}")
+                else:
+                    print(f"Response ({status}): {message}")
+
+            return response
         except Exception as e:
             print(f"Error sending data: {e}")
             self.connected = False
-            return False
+            return None
 
     def close(self):
         """Close the connection to the server."""
@@ -69,7 +110,7 @@ class TcpClient:
             print("Connection closed.")
 
 
-def load_json_from_file(filename="test.json"):
+def load_json_from_file(filename="large_data.json"):
     """Load JSON data from a file in the same directory as the script."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(script_dir, filename)
@@ -81,7 +122,6 @@ def load_json_from_file(filename="test.json"):
     try:
         with open(file_path, "r", encoding="utf-8") as file:
             data = json.load(file)
-            # print(f"Loaded JSON from '{filename}': {data}")
             return data
     except json.JSONDecodeError as e:
         print(f"ERROR: Invalid JSON in '{filename}': {e}")
@@ -105,7 +145,9 @@ def main():
 
     json_data = load_json_from_file()
     if json_data:
-        client.send_json(json_data)
+        response = client.send_json(json_data)
+        if not response:
+            print("Failed to get response for initial JSON data.")
 
     try:
         while True:

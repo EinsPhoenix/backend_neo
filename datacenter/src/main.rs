@@ -4,7 +4,7 @@ use std::env;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::io;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use fern::Dispatch;
 use chrono::Local;
@@ -88,7 +88,10 @@ async fn handle_client(
     loop {
         match receive_json(&mut socket).await {
             Ok(Some(json)) => {
-                ip_payload_handler::process_json(&json, Arc::clone(&db_handler)).await;
+                if let Err(e) = ip_payload_handler::process_json(&json, Arc::clone(&db_handler), &mut socket).await {
+                    error!("Error processing JSON: {}", e);
+                    
+                }
             },
             Ok(None) => {
                 info!("Client disconnected.");
@@ -96,6 +99,7 @@ async fn handle_client(
             },
             Err(e) => {
                 error!("Error receiving JSON: {:?}", e);
+                
                 break;
             }
         }
@@ -105,33 +109,69 @@ async fn handle_client(
 }
 
 async fn receive_json(socket: &mut TcpStream) -> io::Result<Option<Value>> {
-    let mut buf = vec![0; 11 * 1024 * 1024]; 
+    // maximum JSON size 10MB
+    const MAX_JSON_SIZE: usize = 10 * 1024 * 1024;
+    
+    let mut buf = vec![0; MAX_JSON_SIZE]; 
     let n = socket.read(&mut buf).await?;
     
     if n == 0 {
         return Ok(None); 
     }
     
+    if n >= MAX_JSON_SIZE {
+        let error_msg = "Error: JSON payload too large (exceeds 10MB limit)";
+        error!("{}", error_msg);
+        
+        let error_response = json!({
+            "status": "error", 
+            "message": error_msg
+        });
+        
+        let _ = socket.write_all(error_response.to_string().as_bytes()).await;
+        let _ = socket.write_all(b"\n").await;
+        
+        return Err(io::Error::new(io::ErrorKind::InvalidData, error_msg));
+    }
+    
     buf.truncate(n);
     
     match String::from_utf8(buf) {
         Ok(data) => {
-            info!("Empfangene Datengröße: {} Bytes", data.len());
+            info!("Received data size: {} bytes", data.len());
             match serde_json::from_str::<Value>(&data) {
                 Ok(json) => {
-                    info!("JSON erfolgreich geparst");
+                    info!("JSON successfully parsed");
                     Ok(Some(json))
                 },
                 Err(e) => {
-                    error!("Ungültiges JSON-Format: {:?}", e);
-                    socket.write_all(b"Fehler: Ungueltiges JSON-Format\n").await?;
+                    let error_msg = format!("Invalid JSON format: {}", e);
+                    error!("{}", error_msg);
+                    
+                    let error_response = json!({
+                        "status": "error", 
+                        "message": error_msg
+                    });
+                    
+                    let _ = socket.write_all(error_response.to_string().as_bytes()).await;
+                    let _ = socket.write_all(b"\n").await;
+                    
                     Err(io::Error::new(io::ErrorKind::InvalidData, e))
                 }
             }
         },
         Err(e) => {
-            error!("Ungültige UTF-8 Daten empfangen: {:?}", e);
-            socket.write_all(b"Fehler: Ungueltige UTF-8 Kodierung\n").await?;
+            let error_msg = format!("Invalid UTF-8 data received: {}", e);
+            error!("{}", error_msg);
+            
+            let error_response = json!({
+                "status": "error", 
+                "message": error_msg
+            });
+            
+            let _ = socket.write_all(error_response.to_string().as_bytes()).await;
+            let _ = socket.write_all(b"\n").await;
+            
             Err(io::Error::new(io::ErrorKind::InvalidData, e))
         }
     }
