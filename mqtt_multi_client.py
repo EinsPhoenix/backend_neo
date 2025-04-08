@@ -6,7 +6,12 @@ import threading
 import random
 import re
 import argparse
+import os
+import logging
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from collections import defaultdict
+from typing import Dict, List, Any, Optional, Tuple
 
 # Configuration
 BROKER = "localhost"
@@ -24,6 +29,7 @@ class MqttClient:
         self.response_received = threading.Event()
         self.start_time = None
         self.first_response_time = None
+        self.end_time = None  # To track total response time
 
         self.paginated_messages = {}
         self.client = mqtt.Client(client_id=self.client_id)
@@ -32,16 +38,54 @@ class MqttClient:
         self.client.username_pw_set(USERNAME, PASSWORD)
         self.lock = threading.Lock()
 
+        # Performance metrics
+        self.is_paginated = False
+        self.total_pages_received = 0
+        self.request_completed = False
+        self.request_timed_out = False
+        self.request_type = None
+
+        self.setup_logging()
+
+    def setup_logging(self):
+        """Initialize logging for this client"""
+        if not os.path.exists("logs"):
+            os.makedirs("logs")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = f"logs/log_client_{self.client_id}_{timestamp}.log"
+
+        # Create logger
+        self.logger = logging.getLogger(self.client_id)
+        self.logger.setLevel(logging.INFO)
+
+        # Create file handler
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+
+        # Create formatter and add it to handler
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        file_handler.setFormatter(formatter)
+
+        # Add handler to logger
+        self.logger.addHandler(file_handler)
+
+        self.logger.info(f"Client {self.client_id} logging initialized")
+
     def on_connect(self, client, userdata, flags, rc):
         with self.lock:
             if rc == 0:
-                print(f"✅ Client {self.client_id} connected to broker (Code: {rc})")
+                log_msg = f"Client {self.client_id} connected to broker (Code: {rc})"
+                print(f"✅ {log_msg}")
+                self.logger.info(log_msg)
             else:
-                print(f"❌ Client {self.client_id} connection error (Code: {rc})")
+                log_msg = f"Client {self.client_id} connection error (Code: {rc})"
+                print(f"❌ {log_msg}")
+                self.logger.error(log_msg)
 
     def on_message(self, client, userdata, msg):
         try:
-            # Record the time of the first received message
+
             if self.first_response_time is None:
                 self.first_response_time = time.time()
 
@@ -52,31 +96,44 @@ class MqttClient:
             page_match = page_pattern.match(msg.topic)
             if page_match:
                 with self.lock:
-                    print(
-                        f"\n📄 Client {self.client_id} received paginated message part on {msg.topic}"
-                    )
+                    log_msg = f"Client {self.client_id} received paginated message part on {msg.topic}"
+                    print(f"\n📄 {log_msg}")
+                    self.logger.info(log_msg)
                 self.handle_paginated_message(page_match, payload)
+                self.is_paginated = True
                 return
 
             # Handle paginated summary messages
             if msg.topic.endswith("/summary"):
                 with self.lock:
-                    print(
-                        f"\n📋 Client {self.client_id} received pagination summary on {msg.topic}"
-                    )
+                    log_msg = f"Client {self.client_id} received pagination summary on {msg.topic}"
+                    print(f"\n📋 {log_msg}")
+                    self.logger.info(log_msg)
                 self.handle_pagination_summary(msg.topic, payload)
+                self.is_paginated = True
                 return
 
             # Regular message
             with self.lock:
-                print(f"\n📨 Client {self.client_id} received response on {msg.topic}:")
+                log_msg = f"Client {self.client_id} received response on {msg.topic}"
+                print(f"\n📨 {log_msg}")
+                self.logger.info(log_msg)
+                # Log a preview of the payload (first 200 chars)
+                payload_str = json.dumps(payload)
+                self.logger.info(f"Payload preview: {payload_str[:200]}...")
                 print(json.dumps(payload, indent=2))
             self.received_response = payload
+            self.end_time = time.time()  # Mark the end time
+            self.request_completed = True
             self.response_received.set()
 
         except json.JSONDecodeError:
             with self.lock:
-                print(f"⚠️ Client {self.client_id} received invalid JSON: {msg.payload}")
+                log_msg = (
+                    f"Client {self.client_id} received invalid JSON: {msg.payload}"
+                )
+                print(f"⚠️ {log_msg}")
+                self.logger.error(log_msg)
 
     def handle_paginated_message(self, match, payload):
         base_topic = match.group(1)
@@ -86,7 +143,9 @@ class MqttClient:
         request_id = payload.get("request_id")
         if not request_id:
             with self.lock:
-                print(f"⚠️ Paginated message missing request_id: {payload}")
+                log_msg = f"Paginated message missing request_id: {payload}"
+                print(f"⚠️ {log_msg}")
+                self.logger.warning(log_msg)
             return
 
         message_id = f"{base_topic}_{request_id}"
@@ -109,11 +168,12 @@ class MqttClient:
         # Store this page
         self.paginated_messages[message_id]["pages"][page_num] = payload.get("data", [])
         self.paginated_messages[message_id]["received_pages"] += 1
+        self.total_pages_received += 1
 
         with self.lock:
-            print(
-                f"📄 Received page {page_num}/{self.paginated_messages[message_id]['total_pages']} for {message_id}"
-            )
+            log_msg = f"Received page {page_num}/{self.paginated_messages[message_id]['total_pages']} for {message_id}"
+            print(f"📄 {log_msg}")
+            self.logger.info(log_msg)
 
         # Check if we have all pages and can reassemble
         if (
@@ -121,7 +181,9 @@ class MqttClient:
             == self.paginated_messages[message_id]["total_pages"]
         ):
             with self.lock:
-                print(f"🔄 All pages received for {message_id}, reassembling...")
+                log_msg = f"All pages received for {message_id}, reassembling..."
+                print(f"🔄 {log_msg}")
+                self.logger.info(log_msg)
             self.reassemble_paginated_message(message_id)
 
     def handle_pagination_summary(self, topic, payload):
@@ -131,15 +193,17 @@ class MqttClient:
 
         if not request_id or not base_topic:
             with self.lock:
-                print(f"⚠️ Summary message missing critical data: {payload}")
+                log_msg = f"Summary message missing critical data: {payload}"
+                print(f"⚠️ {log_msg}")
+                self.logger.warning(log_msg)
             return
 
         message_id = f"{base_topic}_{request_id}"
 
         with self.lock:
-            print(
-                f"📋 Summary for {message_id}: {total_pages} pages, {payload.get('total_items', 0)} items"
-            )
+            log_msg = f"Summary for {message_id}: {total_pages} pages, {payload.get('total_items', 0)} items"
+            print(f"📋 {log_msg}")
+            self.logger.info(log_msg)
 
         # If we already have all pages, trigger reassembly
         if (
@@ -147,9 +211,11 @@ class MqttClient:
             and self.paginated_messages[message_id]["received_pages"] == total_pages
         ):
             with self.lock:
-                print(
-                    f"🔄 All pages already received for {message_id}, reassembling..."
+                log_msg = (
+                    f"All pages already received for {message_id}, reassembling..."
                 )
+                print(f"🔄 {log_msg}")
+                self.logger.info(log_msg)
             self.reassemble_paginated_message(message_id)
 
     def reassemble_paginated_message(self, message_id):
@@ -162,15 +228,17 @@ class MqttClient:
                 all_items.extend(data["pages"][page_num])
 
             with self.lock:
-                print(
-                    f"✅ Reassembled {len(all_items)} items from {len(data['pages'])} pages"
-                )
+                log_msg = f"Reassembled {len(all_items)} items from {len(data['pages'])} pages"
+                print(f"✅ {log_msg}")
+                self.logger.info(log_msg)
 
             # Mark as complete to avoid reassembling again if we get multiple triggers
             self.paginated_messages[message_id]["complete"] = True
 
             # Set as the response and trigger the event
             self.received_response = all_items
+            self.end_time = time.time()  # Mark the end time
+            self.request_completed = True
             self.response_received.set()
 
             # Save to file
@@ -179,13 +247,21 @@ class MqttClient:
                 json.dump(all_items, f, indent=2)
 
             with self.lock:
-                print(f"💾 Paginated response saved to {filename}")
+                log_msg = f"Paginated response saved to {filename}"
+                print(f"💾 {log_msg}")
+                self.logger.info(log_msg)
 
     def send_request(self, query_data, response_suffix, timeout=15):
         self.response_received.clear()
         self.received_response = None
         self.paginated_messages = {}
         self.first_response_time = None  # Reset first response time tracker
+        self.end_time = None  # Reset end time
+        self.is_paginated = False
+        self.total_pages_received = 0
+        self.request_completed = False
+        self.request_timed_out = False
+        self.request_type = response_suffix
 
         try:
             self.client.connect(BROKER, PORT)
@@ -207,6 +283,9 @@ class MqttClient:
             self.client.subscribe(summary_topic)
 
             with self.lock:
+                self.logger.info(f"Subscribed to: {response_topic}")
+                self.logger.info(f"Subscribed to: {page_wildcard}")
+                self.logger.info(f"Subscribed to: {summary_topic}")
                 print(f"🔔 Client {self.client_id} subscribed to: {response_topic}")
                 print(f"🔔 Client {self.client_id} subscribed to: {page_wildcard}")
                 print(f"🔔 Client {self.client_id} subscribed to: {summary_topic}")
@@ -219,9 +298,11 @@ class MqttClient:
             self.client.publish(REQUEST_TOPIC, json.dumps(query_data))
 
             with self.lock:
-                print(
-                    f"📤 Client {self.client_id} sent request: {json.dumps(query_data)}"
+                log_msg = (
+                    f"Client {self.client_id} sent request: {json.dumps(query_data)}"
                 )
+                print(f"📤 {log_msg}")
+                self.logger.info(log_msg)
 
             timeout = 30 if "all" in response_suffix else timeout
             result = self.response_received.wait(timeout)
@@ -233,24 +314,55 @@ class MqttClient:
 
             with self.lock:
                 if elapsed_time is not None:
-                    print(
-                        f"⏱️ Client {self.client_id} first response received in {elapsed_time:.3f} seconds"
-                    )
+                    log_msg = f"Client {self.client_id} first response received in {elapsed_time:.3f} seconds"
+                    print(f"⏱️ {log_msg}")
+                    self.logger.info(log_msg)
                 else:
-                    print(f"⏱️ Client {self.client_id} did not receive any response")
+                    log_msg = f"Client {self.client_id} did not receive any response"
+                    print(f"⏱️ {log_msg}")
+                    self.logger.warning(log_msg)
 
                 if result:
-                    print(f"✅ Client {self.client_id} received complete response")
+                    log_msg = f"Client {self.client_id} received complete response"
+                    print(f"✅ {log_msg}")
+                    self.logger.info(log_msg)
                 else:
-                    print(
-                        f"⌛ Client {self.client_id} timed out after {timeout} seconds"
+                    log_msg = (
+                        f"Client {self.client_id} timed out after {timeout} seconds"
                     )
+                    print(f"⌛ {log_msg}")
+                    self.logger.warning(log_msg)
+                    self.request_timed_out = True
 
             return self.received_response
 
         finally:
             self.client.loop_stop()
             self.client.disconnect()
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics for this client"""
+        metrics = {
+            "client_id": self.client_id,
+            "request_type": self.request_type,
+            "start_time": self.start_time,
+            "first_response_time": self.first_response_time,
+            "end_time": self.end_time,
+            "is_paginated": self.is_paginated,
+            "total_pages": self.total_pages_received,
+            "completed": self.request_completed,
+            "timed_out": self.request_timed_out,
+        }
+
+        if self.first_response_time and self.start_time:
+            metrics["first_response_latency"] = (
+                self.first_response_time - self.start_time
+            )
+
+        if self.end_time and self.start_time:
+            metrics["total_duration"] = self.end_time - self.start_time
+
+        return metrics
 
 
 def run_test_client(client_name, request_type, params):
@@ -297,9 +409,81 @@ def run_test_client(client_name, request_type, params):
         return client.send_request({"request": "newest", "data": ""}, "newest")
     elif request_type == "relation":
         return client.send_request({"request": "relation", "data": ""}, "relation")
+    elif request_type == "page":
+        page = params.get("page", 1)
+        return client.send_request({"request": "page", "data": page}, "page")
+
+    return None
 
 
-def run_multiple_clients(num_clients=2, test_type=None):
+def run_test_client_with_metrics(
+    client_name, request_type, params
+) -> Tuple[Optional[Any], Dict[str, Any]]:
+    """Run a test client and return both result and metrics"""
+    client = MqttClient(client_name)
+
+    # Map request type to handler function
+    request_handlers = {
+        "uuid": lambda: client.send_request(
+            {
+                "request": "uuid",
+                "payload": [{"uuid": params.get("uuid", "abc123xyz001")}],
+            },
+            "uuid",
+        ),
+        "all": lambda: client.send_request({"request": "all"}, "all"),
+        "color": lambda: client.send_request(
+            {"request": "color", "data": params.get("color", "red")}, "color"
+        ),
+        "time_range": lambda: client.send_request(
+            {
+                "request": "time_range",
+                "start": params.get("start", "2025-01-01T00:00:00Z"),
+                "end": params.get("end", "2025-03-01T00:00:00Z"),
+            },
+            "time_range",
+        ),
+        "temperature_humidity": lambda: client.send_request(
+            {
+                "request": "temperature_humidity",
+                "temperature": params.get("temperature", 22.5),
+                "humidity": params.get("humidity", 45.0),
+            },
+            "temperature_humidity",
+        ),
+        "timestamp": lambda: client.send_request(
+            {
+                "request": "timestamp",
+                "data": params.get("timestamp", "2025-02-15T12:30:00Z"),
+            },
+            "timestamp",
+        ),
+        "energy_cost": lambda: client.send_request(
+            {"request": "energy_cost", "data": params.get("cost", 0.25)}, "energy_cost"
+        ),
+        "energy_consume": lambda: client.send_request(
+            {"request": "energy_consume", "data": params.get("consume", 150.0)},
+            "energy_consume",
+        ),
+        "newest": lambda: client.send_request(
+            {"request": "newest", "data": ""}, "newest"
+        ),
+        "relation": lambda: client.send_request(
+            {"request": "relation", "data": ""}, "relation"
+        ),
+        "page": lambda: client.send_request({"request": "page", "data": 1}, "page"),
+    }
+
+    # Execute the appropriate handler
+    if request_type in request_handlers:
+        result = request_handlers[request_type]()
+        return result, client.get_metrics()
+
+    client.logger.error(f"Unknown request type: {request_type}")
+    return None, client.get_metrics()
+
+
+def run_multiple_clients(num_clients=5, test_type=None):
     """Run multiple clients simultaneously"""
     test_types = [
         "uuid",
@@ -312,6 +496,7 @@ def run_multiple_clients(num_clients=2, test_type=None):
         "energy_consume",
         "newest",
         "relation",
+        "page",
     ]
 
     if test_type and test_type not in test_types:
@@ -319,6 +504,7 @@ def run_multiple_clients(num_clients=2, test_type=None):
         return
 
     tasks = []
+    all_metrics = []
 
     for i in range(num_clients):
         client_name = f"test-client-{i+1}"
@@ -335,21 +521,17 @@ def run_multiple_clients(num_clients=2, test_type=None):
             colors = ["red", "green", "blue", "yellow", "purple"]
             params["color"] = colors[i % len(colors)]
         elif selected_test == "time_range":
-            params["start"] = f"2025-0{i+1}-01T00:00:00Z"
-            params["end"] = f"2025-0{i+2}-01T00:00:00Z"
+            params["start"] = f"2025-0{(i % 12)+1}-01T00:00:00Z"
+            params["end"] = f"2025-0{((i+1) % 12)+1}-01T00:00:00Z"
         elif selected_test == "temperature_humidity":
             params["temperature"] = 20.0 + i
             params["humidity"] = 40.0 + i
         elif selected_test == "timestamp":
-            params["timestamp"] = f"2025-02-{15+i}T12:30:00Z"
+            params["timestamp"] = f"2025-02-{(15+i) % 28}T12:30:00Z"
         elif selected_test == "energy_cost":
             params["cost"] = 0.20 + (i * 0.05)
         elif selected_test == "energy_consume":
             params["consume"] = 100.0 + (i * 50.0)
-        elif selected_test == "newest":
-            params["newest"] = ""
-        elif selected_test == "relation":
-            params["relation"] = ""
 
         tasks.append((client_name, selected_test, params))
 
@@ -358,20 +540,134 @@ def run_multiple_clients(num_clients=2, test_type=None):
     # Create a thread pool and submit all tasks
     with ThreadPoolExecutor(max_workers=num_clients) as executor:
         futures = [
-            executor.submit(run_test_client, name, test, params)
+            executor.submit(run_test_client_with_metrics, name, test, params)
             for name, test, params in tasks
         ]
 
+        # Collect metrics as tasks complete
         for future in futures:
-            future.result()
+            _, metrics = future.result()
+            all_metrics.append(metrics)
 
     print(f"✅ All client tests completed")
+
+    # Generate and print benchmark report
+    generate_benchmark_report(all_metrics)
+
+
+def generate_benchmark_report(metrics):
+    """Generate a report of performance metrics from the test run"""
+    if not metrics:
+        print("No metrics available to generate report.")
+        return
+
+    # Create a logs directory if it doesn't exist
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+
+    # Timestamp for report
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_file = f"logs/benchmark_report_{timestamp}.txt"
+
+    # Initialize counters
+    total_clients = len(metrics)
+    completed_requests = sum(1 for m in metrics if m.get("completed", False))
+    timed_out_requests = sum(1 for m in metrics if m.get("timed_out", False))
+    paginated_requests = sum(1 for m in metrics if m.get("is_paginated", False))
+    non_paginated_requests = total_clients - paginated_requests
+
+    # Response time calculations
+    response_times = [
+        m.get("first_response_latency")
+        for m in metrics
+        if m.get("first_response_latency") is not None
+    ]
+    avg_response_time = (
+        sum(response_times) / len(response_times) if response_times else 0
+    )
+
+    # Total duration calculations
+    total_durations = [
+        m.get("total_duration") for m in metrics if m.get("total_duration") is not None
+    ]
+    avg_total_duration = (
+        sum(total_durations) / len(total_durations) if total_durations else 0
+    )
+
+    # Request type metrics
+    request_types = {}
+    for m in metrics:
+        req_type = m.get("request_type")
+        if req_type:
+            if req_type not in request_types:
+                request_types[req_type] = {
+                    "count": 0,
+                    "completed": 0,
+                    "timed_out": 0,
+                    "response_times": [],
+                }
+
+            request_types[req_type]["count"] += 1
+
+            if m.get("completed", False):
+                request_types[req_type]["completed"] += 1
+
+            if m.get("timed_out", False):
+                request_types[req_type]["timed_out"] += 1
+
+            if m.get("first_response_latency") is not None:
+                request_types[req_type]["response_times"].append(
+                    m.get("first_response_latency")
+                )
+
+    # Generate report
+    with open(report_file, "w") as f:
+        f.write(f"MQTT CLIENT BENCHMARK REPORT - {timestamp}\n")
+        f.write("=" * 60 + "\n\n")
+
+        f.write("SUMMARY\n")
+        f.write("-" * 30 + "\n")
+        f.write(f"Total Clients: {total_clients}\n")
+        f.write(f"Completed Requests: {completed_requests}\n")
+        f.write(f"Timed Out Requests: {timed_out_requests}\n")
+        f.write(f"Average Response Time: {avg_response_time:.3f} seconds\n")
+        f.write(f"Average Total Duration: {avg_total_duration:.3f} seconds\n")
+        f.write(f"Paginated Responses: {paginated_requests}\n")
+        f.write(f"Non-paginated Responses: {non_paginated_requests}\n\n")
+
+        f.write("REQUEST TYPE BREAKDOWN\n")
+        f.write("-" * 30 + "\n")
+        for req_type, data in request_types.items():
+            avg_time = (
+                sum(data["response_times"]) / len(data["response_times"])
+                if data["response_times"]
+                else 0
+            )
+            f.write(f"Type: {req_type}\n")
+            f.write(f"  Count: {data['count']}\n")
+            f.write(f"  Completed: {data['completed']}\n")
+            f.write(f"  Timed Out: {data['timed_out']}\n")
+            f.write(f"  Average Response Time: {avg_time:.3f} seconds\n\n")
+
+    # Print summary to console
+    print("\n📊 BENCHMARK REPORT SUMMARY")
+    print("-" * 30)
+    print(f"Total Clients: {total_clients}")
+    print(f"Completed Requests: {completed_requests}")
+    print(f"Timed Out Requests: {timed_out_requests}")
+    print(f"Average Response Time: {avg_response_time:.3f} seconds")
+    print(f"Paginated Responses: {paginated_requests}")
+    print(f"Non-paginated Responses: {non_paginated_requests}")
+    print(f"Full report saved to: {report_file}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MQTT Multi-Client Test Tool")
     parser.add_argument(
-        "--clients", type=int, default=2, help="Number of simultaneous clients"
+        "--clients",
+        type=int,
+        default=5,
+        help="Number of simultaneous clients (5-20 recommended)",
     )
     parser.add_argument(
         "--test",
@@ -387,10 +683,18 @@ if __name__ == "__main__":
             "energy_consume",
             "newest",
             "relation",
+            "page",
         ],
         help="Specific test to run (if not specified, random tests will be chosen)",
     )
 
     args = parser.parse_args()
+
+    # Ensure sensible client count
+    if args.clients < 1:
+        args.clients = 1
+    elif args.clients > 50:
+        print("Warning: Limiting to 50 clients to prevent overloading")
+        args.clients = 50
 
     run_multiple_clients(args.clients, args.test)

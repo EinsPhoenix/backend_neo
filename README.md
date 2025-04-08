@@ -1,15 +1,4 @@
-# Testing
 
-## How to Use:
-
-### Basic Usage (2 clients, random tests):
-mqtt_multi_client.py
-
-### Specify number of clients:
-mqtt_multi_client.py --clients 3
-
-### Run specific test type with multiple clients:
-mqtt_multi_client.py --clients 3 --test uuid
 
 
 

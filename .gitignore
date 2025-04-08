@@ -163,3 +163,4 @@ dist
 **/.mosquitto.log
 
 **/test_log.txt
+mqtt-broker/mosquitto/log/mosquitto.log

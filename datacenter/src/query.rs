@@ -480,9 +480,9 @@ pub async fn get_newest_uuid(graph: &Graph) -> Option<Value> {
 }
 
 pub async fn get_paginated_uuids(graph: &Graph, page: usize) -> Option<Value> {
-    const PAGE_SIZE: usize = 50;
+    const PAGE_SIZE: usize = 25;
     
-   
+  
     let count_query = query(r#"
         MATCH (uuidNode:UUID)
         RETURN count(uuidNode) AS total
@@ -503,7 +503,7 @@ pub async fn get_paginated_uuids(graph: &Graph, page: usize) -> Option<Value> {
         }
     };
     
-   
+    
     let total_pages = if total_count == 0 {
         0
     } else {
@@ -513,12 +513,19 @@ pub async fn get_paginated_uuids(graph: &Graph, page: usize) -> Option<Value> {
     
     let skip = page * PAGE_SIZE;
     
-    
+   
     let data_query = query(r#"
         MATCH (uuidNode:UUID)-[:HAS_TIMESTAMP]->(timestamp:Timestamp)
         WITH uuidNode, timestamp
         ORDER BY timestamp.value DESC
-        RETURN uuidNode.id AS uuid
+        RETURN 
+            uuidNode.id AS uuid,
+            uuidNode.color AS color,
+            uuidNode.temperature AS temperature,
+            uuidNode.humidity AS humidity,
+            uuidNode.timestamp AS timestamp,
+            uuidNode.energy_consume AS energy_consume,
+            uuidNode.energy_cost AS energy_cost
         SKIP $skip
         LIMIT $limit
     "#)
@@ -527,18 +534,26 @@ pub async fn get_paginated_uuids(graph: &Graph, page: usize) -> Option<Value> {
     
     match graph.execute(data_query).await {
         Ok(mut result) => {
-            let mut uuids = Vec::new();
+            let mut nodes = Vec::new();
             while let Ok(Some(row)) = result.next().await {
-                let node: Value = row.get("uuid").unwrap();
-                uuids.push(node);
+                
+                let node = json!({
+                    "uuid": row.get::<Value>("uuid").unwrap_or(Value::Null),
+                    "color": row.get::<Value>("color").unwrap_or(Value::Null),
+                    "temperature": row.get::<Value>("temperature").unwrap_or(Value::Null),
+                    "humidity": row.get::<Value>("humidity").unwrap_or(Value::Null),
+                    "timestamp": row.get::<Value>("timestamp").unwrap_or(Value::Null),
+                    "energy_consume": row.get::<Value>("energy_consume").unwrap_or(Value::Null),
+                    "energy_cost": row.get::<Value>("energy_cost").unwrap_or(Value::Null)
+                });
+                nodes.push(node);
             }
             
             info!("Returning page {} of {} with {} UUIDs", 
-                  page, total_pages, uuids.len());
+                  page, total_pages, nodes.len());
             
-           
             Some(json!({
-                "uuids": uuids,
+                "nodes": nodes,
                 "pagination": {
                     "total_count": total_count,
                     "total_pages": total_pages,
